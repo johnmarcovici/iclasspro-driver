@@ -1,24 +1,16 @@
 # iClassPro
-Automate class enrollments to an iClassPro portal.
+Automate enrollments for classes offered with an iClassPro portal.
 
 ## Why?
-I decided to automate the enrollment process because the manual (i.e. normal) process is click-intensive and time consuming
-- Adding just a single class can take about 5 clicks, and you must add each class separately
-- You cannot set the schedule to repeat so you must repeat the process every week
-- There is no API provided so I wrote a custom automation (with selenium as the driver)
+I decided to automate the enrollment process because the manual (i.e. normal) process is fairly click-intensive and time consuming. It works fine for adding a single class from time to time, but for recurring schedules it can be a bit difficult.
 
 ## Who?
 The code has only been tested with [SCAQ's iClassPro portal](https://app.iclasspro.com/portal/scaq). Controls have been exposed so that another team could work, provided it follows the same click-through workflow.
 
 ## Setup
-### Create a python virtual environment  
+### Create a virtual environment and install requirements  
 ```console
-python -m venv venv && source ./venv/bin/activate
-```
-
-### Install requirements  
-```console
-pip3 install -r requirements.txt
+python -m venv venv && source ./venv/bin/activate && pip3 install -r requirements.txt
 ```
 
 ### Install google-chrome
