@@ -1,0 +1,37 @@
+[
+  {
+    "Location": "El Segundo",
+    "Time": "12:00pm",
+    "Day": "Monday"
+  },
+  {
+    "Location": "Culver",
+    "Time": "12:00pm",
+    "Day": "Tuesday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "12:00pm",
+    "Day": "Wednesday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Thursday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "12:00pm",
+    "Day": "Friday"
+  },
+  {
+    "Location": "Santa Monica",
+    "Time": "9:00am",
+    "Day": "Saturday"
+  },
+  {
+    "Location": "Santa Monica",
+    "Time": "9:00am",
+    "Day": "Sunday"
+  }
+]
