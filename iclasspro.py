@@ -178,16 +178,18 @@ if __name__ == "__main__":
         help="Portal location (a popup that may appear during the login process)",
     )
     parser.add_argument(
-        "--schedule-file",
+        "--schedule",
         type=str,
         default="schedule.json",
-        help="Schedule File - a JSON file with keys Location, Time, and Day",
+        help="Schedule - a JSON file with keys Location, Time, and Day",
+    )
+    parser.add_argument("--email", type=str, default="", help="iClassPro Email")
+    parser.add_argument("--password", type=str, default="", help="iClassPro Password")
+    parser.add_argument(
+        "--student-id", type=int, default=0, help="iClassPro Student ID"
     )
     parser.add_argument(
-        "--credentials-file",
-        type=str,
-        default="credentials.json",
-        help="Credentials File - an JSON file with keys email, password, student_id, and promo_code",
+        "--promo-code", type=str, default="", help="iClassPro Promo Code"
     )
     parser.add_argument(
         "--chrome-driver",
@@ -213,16 +215,13 @@ if __name__ == "__main__":
 
     # Build schedule
     if args.build_schedule:
-        schedule_builder(schedule_file=args.schedule_file)
+        schedule_builder(schedule=args.schedule)
 
     c = iClassPro(base_url=args.base_url)
 
-    # Read credentials
-    credentials = json.load(open(args.credentials_file, "r"))
-
     try:
         # Read schedule
-        schedule = json.load(open(args.schedule_file, "r"))
+        schedule = json.load(open(args.schedule, "r"))
     except Exception as e:
         print("Error reading schedule file - error was '%s'" % str(e))
         exit()
@@ -233,16 +232,16 @@ if __name__ == "__main__":
     # Login
     c.login(
         location=args.location,
-        email=credentials["email"],
-        password=credentials["password"],
+        email=args.email,
+        password=args.password,
     )
 
     # Add enrollments
     c.add_enrollments(
         schedule=schedule,
-        student_id=credentials["student_id"],
+        student_id=args.student_id,
         next_week=args.next_week,
     )
 
     # Process cart
-    c.process_cart(promo_code=credentials["promo_code"])
+    c.process_cart(promo_code=args.promo_code)

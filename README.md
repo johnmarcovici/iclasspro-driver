@@ -1,11 +1,17 @@
 # iClassPro
 Automate enrollments for classes offered with an iClassPro portal.
 
-## Why?
-I decided to automate the enrollment process because the manual (i.e. normal) process is fairly click-intensive and time consuming. It works fine for adding a single class from time to time, but for recurring schedules it can be a bit difficult.
+## Info
+### Why Automate
+I decided to automate the enrollment process because the manual (i.e. normal) process is fairly click-intensive and time consuming. It works fine for adding a single class from time to time, but for recurring schedules I wanted something easier.
 
-## Who?
-This code is intended for anyone who is enrolling in classes from an iClassPro portal. However, it has only been tested with [SCAQ's iClassPro portal](https://app.iclasspro.com/portal/scaq). Controls have been exposed so that another team could work, provided it follows the same workflow in iClassPro.
+### Intended Users
+This code is intended for use by anyone who is enrolling in classes from an iClassPro portal. However, it has only been tested with [SCAQ's iClassPro portal](https://app.iclasspro.com/portal/scaq). Controls have been exposed so that another team could work, provided it follows the same workflow in iClassPro.
+
+### Why So Slow
+The code processes enrollments pretty slowly (tens of seconds per class), because of pauses that are built in throughout the processing. These pauses exist to allow the iClassPro website pages to render and expose the buttons the tool will search for and click on.  
+
+I would much prefer to operate on an API from iClassPro, but at present no API is offered, so instead this tool emulates a person using the website.
 
 ## Setup
 ### Create a virtual environment and install requirements  
@@ -41,11 +47,6 @@ Locate the table holding the version matching closest to what version you instal
 Locate the row that says chromedriver (not chrome), copy the URL, and paste into a new browser tab. It will download a zip file containing the chromedriver file. Copy that file to a location of your choosing.
 
 ## Run
-### Specify your Login Credentials - One Time Only
-Your login credentials (email, password, etc...) are specified in a file. Copy the provided template [credentials file](./default_credentials.json) to `credentials.json` and populate with your information. This file is ignored (with `.gitignore`) so it will not be saved to the repo.  
-
-Your credentials don't normally change so this is a one-time setup step.
-
 ### Create a Schedule
 The code processes a schedule as described in a json file with one dict per enrollment (class instance). An [example schedule](./default_schedule.json) is included.  
 
@@ -63,14 +64,17 @@ You only need to update the schedule if it changes from your last session.
 Once you have a schedule you want to process, add enrollments with
 
 ```console
-python iclasspro.py
+python iclasspro.py --email <email address> --password <password> --student-id <student ID> --promo-code <promo code> --schedule schedule.json
 ```
 
+where the arguments in brackets such as `<this argument>`
+means fill it in with your specific values and remove the brackets.
+
 ### Combine Schedule Creation and Enrollment Steps
-You can perform the schedule generation and enrollment addition in one step with
+You can perform the schedule generation and enrollment addition in one step by including the argument `--build-schedule` as in
 
 ```console
-python iclasspro.py --build-schedule
+python iclasspro.py --email <email address> --password <password> --student-id <student ID> --promo-code <promo code> --schedule schedule.json --build-schedule
 ```
 
 

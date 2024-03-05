@@ -66,7 +66,7 @@ def process_schedule(output_schedule_filename: str = ""):
             json.dump(schedule, open(default_schedule_filename, "w"), indent=2)
 
 
-def main(schedule_file: str = ""):
+def main(schedule: str = ""):
     window.title("SCAQ Schedule Builder")
     window.geometry("1200x150")
     window.geometry("+450+300")
@@ -122,7 +122,7 @@ def main(schedule_file: str = ""):
 
     # Form output schedule file name. Delete if it currently exists
     output_schedule_filename = (
-        schedule_file if schedule_file else form_filename(file_stub="schedule")
+        schedule if schedule else form_filename(file_stub="schedule")
     )
     pathlib.Path(output_schedule_filename).unlink(missing_ok=True)
 
