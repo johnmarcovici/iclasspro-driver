@@ -48,7 +48,7 @@ Locate the row that says chromedriver (not chrome), copy the URL, and paste into
 
 ## Run
 ### Create a Schedule
-The code processes a schedule as described in a json file with one dict per enrollment (class instance), an [example schedule](./default_schedule.json) of which is included. You can copy and modify this schedule to suit your schedule, or build a new one with  
+The code processes a schedule as described in a json file with one dict per enrollment (class instance), an [example of which](./default_schedule.json) is included. You can copy and modify this schedule to suit your schedule, or build a new one with  
 
 ```console
 python schedule_builder.py
