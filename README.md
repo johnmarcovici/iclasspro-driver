@@ -11,7 +11,7 @@ This code is intended for use by anyone who is enrolling in classes from an iCla
 ### Why So Slow
 The code processes enrollments pretty slowly (tens of seconds per class), because of pauses that are built in throughout the processing. These pauses exist to allow the iClassPro website pages to render and expose the buttons the tool will search for and click on.  
 
-I would much prefer to operate on an API from iClassPro, but at present no API is offered, so instead this tool emulates a person using the website.
+I would prefer to operate on an API from iClassPro, but at present none are offered, so instead this tool emulates a person using the website.
 
 ## Setup
 ### Create a virtual environment and install requirements  
