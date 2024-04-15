@@ -42,13 +42,13 @@ you will need a chromedriver with version 116.0.5845.** where ** means any sub-v
 Go here:
 https://googlechromelabs.github.io/chrome-for-testing
 
-Locate the table holding the version matching closest to what version you installed for google-chrome (see previous section). An example of a recent table with the pertinent row (for a linux install) highlighted is shown here:
+Locate the table holding the version matching closest to what version you installed for google-chrome (see previous section), and from within this table, locate the row that says chromedriver (not chrome). An example of a recent table with the pertinent row (for a linux install) highlighted is shown here:
 
 <center>
     <img src = chromedriver-install-page.png/>
 </center>
 
-Locate the row that says chromedriver (not chrome), copy the URL, and paste into a new browser tab. It will download a zip file containing the chromedriver file. Copy that file to a location of your choosing.
+Copy the URL from the table and paste into a new browser tab. It will download a zip file containing the chromedriver file. Copy that file to the same folder where you checkout this repository.
 
 ## Run
 ### Create a Schedule
