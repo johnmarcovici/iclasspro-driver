@@ -42,7 +42,7 @@ you will need a chromedriver with version 116.0.5845.** where ** means any sub-v
 Go here:
 https://googlechromelabs.github.io/chrome-for-testing
 
-Locate the table holding the version matching closest to what version you installed for google-chrome (see previous section), and from within this table, locate the row that says chromedriver (not chrome). An example of a recent table with the pertinent row (for a linux install) highlighted is shown here:
+Locate the table holding the version matching closest to what version you installed for google-chrome (see previous section), and from within this table, locate the row that says **chromedriver** (not chrome). An example of a recent table with the pertinent row (for a linux install) highlighted is shown here:
 
 <center>
     <img src = chromedriver-install-page.png/>
