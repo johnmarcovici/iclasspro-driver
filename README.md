@@ -3,7 +3,7 @@ Automate enrollments for classes offered with an iClassPro portal.
 
 ## Info
 ### Why Automate
-I decided to automate the enrollment process because the manual (i.e. normal) process is fairly click-intensive and time consuming. It works fine for adding a single class from time to time, but for recurring schedules I wanted something easier.
+I decided to automate the enrollment process because the normal process is click-intensive and time consuming. It works fine for adding a single class, but for recurring schedules I wanted something easier.
 
 ### Intended Users
 This code is intended for use by anyone who is enrolling in classes from an iClassPro portal. However, it has only been tested with [SCAQ's iClassPro portal](https://app.iclasspro.com/portal/scaq). Controls have been exposed so that another team could work, provided it follows the same workflow in iClassPro.
@@ -11,7 +11,7 @@ This code is intended for use by anyone who is enrolling in classes from an iCla
 ### Why So Slow
 The code processes enrollments pretty slowly (tens of seconds per class), because of pauses that are built in throughout the processing. These pauses exist to allow the iClassPro website pages to render and expose the buttons the tool will search for and click on.  
 
-I would prefer to operate on an API from iClassPro, but at present none are offered, so instead this tool emulates a person using the website.
+I would prefer to operate on an API from iClassPro, but at present none is offered, so instead this tool emulates a person using the website.
 
 ## Setup
 ### Create a virtual environment and install requirements  
@@ -42,7 +42,7 @@ you will need a chromedriver with version 116.0.5845.** where ** means any sub-v
 Go here:
 https://googlechromelabs.github.io/chrome-for-testing
 
-Locate the table holding the version matching closest to what version you installed for google-chrome (see previous section), and from within this table, locate the row that says **chromedriver** (not chrome). An example of a recent table with the pertinent row (for a linux install) highlighted is shown here:
+Locate the table holding the version matching closest to what version you installed for google-chrome, and from within this table, locate the row that says **chromedriver** (not chrome). An example of a recent table with the pertinent row for a linux install is shown here:
 
 <center>
     <img src = chromedriver-install-page.png/>
