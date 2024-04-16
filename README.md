@@ -3,7 +3,7 @@ Automate enrollments for classes offered with an iClassPro portal.
 
 ## Info
 ### Why Automate
-I decided to automate the enrollment process because the normal process is click-intensive and time consuming. It works fine for adding a single class, but for recurring schedules I wanted something easier.
+I decided to automate enrollments because the normal process is click-intensive and time consuming. It works fine for adding a single class, but for recurring schedules I wanted something easier.
 
 ### Intended Users
 This code is intended for use by anyone who is enrolling in classes from an iClassPro portal. However, it has only been tested with [SCAQ's iClassPro portal](https://app.iclasspro.com/portal/scaq). Controls have been exposed so that another team could work, provided it follows the same workflow in iClassPro.
