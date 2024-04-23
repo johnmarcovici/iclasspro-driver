@@ -3,19 +3,11 @@ import tkinter as tk
 import json
 
 window = tk.Tk()
-days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-locations = ["(None)", "El Segundo", "Santa Monica", "Culver", "VNSO"]
-times = [
-    "(None)",
-    "5:45am",
-    "6:00am",
-    "7:00am",
-    "8:00am",
-    "9:00am",
-    "10:00am",
-    "11:00am",
-    "12:00pm",
-]
+
+locations_times_dict = json.load(open("./times_locations.json", "r"))
+days = locations_times_dict["days"]
+locations = locations_times_dict["locations"]
+times = locations_times_dict["times"]
 locationvars = []
 timevars = []
 nextweekvar = tk.IntVar()

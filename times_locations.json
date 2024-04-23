@@ -6,6 +6,15 @@
     "Culver",
     "VNSO"
   ],
+  "days": [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+  ],
   "times": [
     "(None)",
     "5:45am",
