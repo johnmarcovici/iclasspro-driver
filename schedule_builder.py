@@ -5,9 +5,6 @@ import json
 window = tk.Tk()
 
 locations_times_dict = json.load(open("./times_locations.json", "r"))
-days = locations_times_dict["days"]
-locations = locations_times_dict["locations"]
-times = locations_times_dict["times"]
 locationvars = []
 timevars = []
 nextweekvar = tk.IntVar()
@@ -24,21 +21,21 @@ def destroy():
 
 def reset():
     for k in range(len(locationvars)):
-        locationvars[k].set(locations[0])
-        timevars[k].set(times[0])
+        locationvars[k].set(locations_times_dict["locations"][0])
+        timevars[k].set(locations_times_dict["times"][0])
 
 
 def process_schedule(output_schedule_filename: str = ""):
     schedule = []
     nextweek = " (Next Week)" if nextweekvar.get() else ""
 
-    for k in range(len(days)):
+    for k in range(len(locations_times_dict["days"])):
         location = locationvars[k].get()
-        if location != locations[0]:
+        if location != locations_times_dict["locations"][0]:
             row = {
                 "Location": locationvars[k].get(),
                 "Time": timevars[k].get(),
-                "Day": days[k] + nextweek,
+                "Day": locations_times_dict["days"][k] + nextweek,
             }
             schedule.append(row)
 
@@ -79,30 +76,32 @@ def main(schedule: str = ""):
     default_locations = [d["Location"] for d in default_schedule]
     default_times = [d["Time"] for d in default_schedule]
 
-    for k in range(len(days)):
+    for k in range(len(locations_times_dict["days"])):
         frame.columnconfigure(k, weight=1)
 
         # Add day of week label
-        label = tk.Label(frame, text=days[k])
+        label = tk.Label(frame, text=locations_times_dict["days"][k])
         label.grid(row=0, column=k)
 
-        if days[k] in default_days:
-            idx = default_days.index(days[k])
-            idx_location = locations.index(default_locations[idx])
-            idx_time = times.index(default_times[idx])
+        if locations_times_dict["days"][k] in default_days:
+            idx = default_days.index(locations_times_dict["days"][k])
+            idx_location = locations_times_dict["locations"].index(
+                default_locations[idx]
+            )
+            idx_time = locations_times_dict["times"].index(default_times[idx])
         else:
             idx_location = idx_time = 0
 
         # Add location menu
-        v = tk.StringVar(frame, value=locations[idx_location])
-        w = tk.OptionMenu(frame, v, *locations)
+        v = tk.StringVar(frame, value=locations_times_dict["locations"][idx_location])
+        w = tk.OptionMenu(frame, v, *locations_times_dict["locations"])
         w.config(width=30)
         w.grid(row=1, column=k)
         locationvars.append(v)
 
         # Add time menu
-        v = tk.StringVar(frame, value=times[idx_time])
-        w = tk.OptionMenu(frame, v, *times)
+        v = tk.StringVar(frame, value=locations_times_dict["times"][idx_time])
+        w = tk.OptionMenu(frame, v, *locations_times_dict["times"])
         w.config(width=30)
         w.grid(row=2, column=k)
         timevars.append(v)
