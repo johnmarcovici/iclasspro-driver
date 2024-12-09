@@ -132,6 +132,7 @@ def main(schedule: str = ""):
     nextweek_check = tk.Checkbutton(
         frame, text="Next Week", variable=nextweekvar, width=20
     )
+    nextweek_check.select()
 
     cancel_button.pack(side="left")
     reset_button.pack(side="left")
