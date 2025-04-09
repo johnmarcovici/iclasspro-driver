@@ -66,7 +66,7 @@ You only need to update the schedule if it changes from your last session.
 Once you have a schedule you want to process, add enrollments with
 
 ```console
-python iclasspro.py --email <email address> --password <password> --student-id <student ID> --promo-code <promo code> --schedule schedule.json
+python iclasspro.py --email <email address> --password <password> --student-id <student ID> --schedule schedule.json
 ```
 
 where the arguments in brackets such as `<this argument>`
@@ -76,8 +76,15 @@ means fill it in with your specific values and remove the brackets.
 You can perform the schedule generation and enrollment addition in one step by including the argument `--build-schedule` as in
 
 ```console
-python iclasspro.py --email <email address> --password <password> --student-id <student ID> --promo-code <promo code> --schedule schedule.json --build-schedule
+python iclasspro.py --email <email address> --password <password> --student-id <student ID> --schedule schedule.json --build-schedule
 ```
 
+### Promo Codes
+As of April 2025, iClassPro is automatically including your promo code, if you have one, so that this tool no longer needs to populate it
+- However, if you find it is not being populated, supply an additional argument with
+
+```console
+python iclasspro.py --promo-code <promo code> <... all other args ...>
+```
 
 
