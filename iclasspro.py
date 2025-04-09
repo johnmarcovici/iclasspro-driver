@@ -146,8 +146,13 @@ class iClassPro:
         sleep(5)
 
         # Fill promo code
-        self.click(by=By.PARTIAL_LINK_TEXT, searchstr="Use Promo Code")
-        self.send_keys(key=promo_code, enter=True, by=By.NAME, searchstr="promoCode")
+        try:
+            self.click(by=By.PARTIAL_LINK_TEXT, searchstr="Use Promo Code")
+            self.send_keys(
+                key=promo_code, enter=True, by=By.NAME, searchstr="promoCode"
+            )
+        except Exception as e:
+            print("Error filling promo code - error was '%s'" % str(e))
 
         # Complete the transaction
         nsec_wait = 10
