@@ -146,13 +146,14 @@ class iClassPro:
         sleep(5)
 
         # Fill promo code
-        try:
-            self.click(by=By.PARTIAL_LINK_TEXT, searchstr="Use Promo Code")
-            self.send_keys(
-                key=promo_code, enter=True, by=By.NAME, searchstr="promoCode"
-            )
-        except Exception as e:
-            print("Error filling promo code - error was '%s'" % str(e))
+        if promo_code:
+            try:
+                self.click(by=By.PARTIAL_LINK_TEXT, searchstr="Use Promo Code")
+                self.send_keys(
+                    key=promo_code, enter=True, by=By.NAME, searchstr="promoCode"
+                )
+            except Exception as e:
+                print("Error filling promo code - error was '%s'" % str(e))
 
         # Complete the transaction
         nsec_wait = 10
@@ -164,6 +165,41 @@ class iClassPro:
         self.click(by=By.TAG_NAME, searchstr="button", filterstr="Complete Transaction")
         sleep(15)
         self.driver.quit()
+
+
+def main(args: argparse.Namespace) -> None:
+    # Build schedule
+    if args.build_schedule:
+        schedule_builder(schedule=args.schedule)
+
+    c = iClassPro(base_url=args.base_url)
+
+    try:
+        # Read schedule
+        schedule = json.load(open(args.schedule, "r"))
+    except Exception as e:
+        print("Error reading schedule file - error was '%s'" % str(e))
+        exit()
+
+    # Get webdriver
+    c.webdriver(chrome_driver=args.chrome_driver, chrome_binary=args.chrome_binary)
+
+    # Login
+    c.login(
+        location=args.location,
+        email=args.email,
+        password=args.password,
+    )
+
+    # Add enrollments
+    c.add_enrollments(
+        schedule=schedule,
+        student_id=args.student_id,
+        next_week=args.next_week,
+    )
+
+    # Process cart
+    c.process_cart(promo_code=args.promo_code)
 
 
 if __name__ == "__main__":
@@ -219,36 +255,4 @@ if __name__ == "__main__":
         "--build-schedule", action="store_true", help="Define schedule via GUI"
     )
     args = parser.parse_args()
-
-    # Build schedule
-    if args.build_schedule:
-        schedule_builder(schedule=args.schedule)
-
-    c = iClassPro(base_url=args.base_url)
-
-    try:
-        # Read schedule
-        schedule = json.load(open(args.schedule, "r"))
-    except Exception as e:
-        print("Error reading schedule file - error was '%s'" % str(e))
-        exit()
-
-    # Get webdriver
-    c.webdriver(chrome_driver=args.chrome_driver, chrome_binary=args.chrome_binary)
-
-    # Login
-    c.login(
-        location=args.location,
-        email=args.email,
-        password=args.password,
-    )
-
-    # Add enrollments
-    c.add_enrollments(
-        schedule=schedule,
-        student_id=args.student_id,
-        next_week=args.next_week,
-    )
-
-    # Process cart
-    c.process_cart(promo_code=args.promo_code)
+    main(args)
