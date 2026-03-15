@@ -1,0 +1,17 @@
+[
+  {
+    "Location": "El Segundo",
+    "Time": "12:00pm",
+    "Day": "Monday"
+  },
+  {
+    "Location": "Culver",
+    "Time": "12:00pm",
+    "Day": "Tuesday"
+  },
+  {
+    "Location": "Santa Monica",
+    "Time": "9:00am",
+    "Day": "Sunday"
+  }
+]

@@ -256,7 +256,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--schedule",
         type=str,
-        default="schedule.json",
+        default="schedules/schedule.json",
         help="Schedule - a JSON file with keys Location, Time, and Day",
     )
     parser.add_argument(

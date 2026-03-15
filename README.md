@@ -48,7 +48,9 @@ For security and autonomous operation, store your credentials in a `.env` file:
 **Security Note**: The `.env` file is automatically ignored by git to prevent accidental credential exposure.
 ## Run
 ### Create a Schedule
-The code processes a schedule as described in a JSON file with one dict per enrollment (class instance). An [example schedule](./default_schedule.json) is included. Copy and modify this schedule to suit your needs.
+The code processes a schedule as described in a JSON file with one dict per enrollment (class instance). Schedule files are stored in the `schedules/` directory.
+
+An [example schedule](./schedules/default_schedule.json) is included. Copy and modify this schedule to suit your needs.
 
 Example schedule.json:
 ```json
@@ -66,6 +68,11 @@ Example schedule.json:
 ]
 ```
 
+**Schedule File Locations:**
+- Default: `schedules/schedule.json`
+- Custom: Set `ICLASS_SCHEDULE=schedules/your_schedule.json` in `.env`
+- Command line: `--schedule schedules/custom_schedule.json`
+
 ### Run the Automation
 With credentials configured in `.env`, simply run:
 
@@ -75,7 +82,7 @@ python iclasspro.py
 
 Or override specific values:
 ```console
-python iclasspro.py --schedule custom_schedule.json --next-week
+python iclasspro.py --schedule schedules/custom_schedule.json --next-week
 ```
 
 Use `--help` to see all available options.
