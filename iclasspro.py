@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 
-from time import sleep
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -31,17 +30,29 @@ class iClassPro:
         selector: str = "",
         filterstr: str = "",
         index: int = 0,
-        maxtries: int = 5,
+        timeout: int = 10000,
     ):
-        elements = []
-        numtries = 0
-        while len(elements) == 0 and numtries < maxtries:
-            elements = self.page.query_selector_all(selector)
-            if filterstr:
-                elements = [el for el in elements if filterstr in el.text_content()]
-            numtries += 1
-            sleep(1)
-        return elements[index] if elements else None
+        """Return a locator for the matching element."""
+        locator = self.page.locator(selector)
+        if filterstr:
+            locator = locator.filter(has_text=filterstr)
+
+        try:
+            count = locator.count()
+            if count == 0:
+                return None
+
+            # Support negative indices like Python lists
+            if index < 0:
+                index = count + index
+            if index < 0 or index >= count:
+                return None
+
+            element = locator.nth(index)
+            element.wait_for(state="visible", timeout=timeout)
+            return element
+        except Exception:
+            return None
 
     def click(
         self, element=None, selector: str = "", filterstr: str = "", **kwargs
@@ -52,10 +63,7 @@ class iClassPro:
             )
 
         if element:
-            element.scroll_into_view_if_needed()
-            sleep(1)
             element.click()
-            sleep(3)
 
     def send_keys(
         self,
@@ -64,6 +72,7 @@ class iClassPro:
         enter: bool = False,
         selector: str = "",
         filterstr: str = "",
+        timeout: int = 10000,
         **kwargs,
     ) -> None:
         if element is None:
@@ -72,22 +81,20 @@ class iClassPro:
             )
 
         if element:
-            element.scroll_into_view_if_needed()
-            sleep(1)
+            element.wait_for(state="visible", timeout=timeout)
             element.fill(key)
             if enter:
                 element.press("Enter")
-            sleep(3)
 
     def login(self, location: str = "", email: str = "", password: str = "") -> None:
         # Navigate to login
         self.page.goto(self.base_url + "login")
-        sleep(3)
+        self.page.wait_for_load_state("networkidle")
 
         try:
             # A location prompt may pop up
             self.click(selector="button", filterstr=location)
-        except:
+        except Exception:
             pass
 
         # Process the login page: click Yes for account, then enter username and password
@@ -122,17 +129,21 @@ class iClassPro:
 
         # Proceed to booking page and find matching class by time
         self.page.goto(booking_url)
-        sleep(5)
-        # Find link containing the time
+        self.page.wait_for_load_state("networkidle")
+
         link_selector = f"a:has-text('at {timestr}')"
-        links = self.page.query_selector_all(link_selector)
-        if links:
+        locator = self.page.locator(link_selector)
+        count = locator.count()
+        if count > 0:
             # Use negative index if next_week
-            index = -(("Next Week" in daystr) or next_week)
-            links[index].click()
+            idx = -1 if ("Next Week" in daystr or next_week) else 0
+            if idx < 0:
+                idx = count + idx
+            if 0 <= idx < count:
+                locator.nth(idx).click()
+
         self.click(selector="button", filterstr="Enroll Now")
         self.click(selector="button", filterstr="Add to Cart")
-        sleep(10)
 
     def add_enrollments(
         self, schedule: list = [dict], student_id: int = 0, next_week: bool = False
@@ -156,7 +167,7 @@ class iClassPro:
         # Navigate to cart
         print("\nProcessing cart")
         self.page.goto(self.base_url + "cart")
-        sleep(5)
+        self.page.wait_for_load_state("networkidle")
 
         # Fill promo code
         if promo_code:
@@ -169,14 +180,9 @@ class iClassPro:
                 print("Error filling promo code - error was '%s'" % str(e))
 
         # Complete the transaction
-        nsec_wait = 10
-        print(
-            "\nFinished Processing - review the schedule and the process will accept all in %d seconds."
-            % nsec_wait
-        )
-        sleep(nsec_wait)
+        print("\nFinishing processing; clicking Complete Transaction...")
         self.click(selector="button", filterstr="Complete Transaction")
-        sleep(15)
+        self.page.wait_for_load_state("networkidle")
         self.browser.close()
         self.playwright.stop()
 
