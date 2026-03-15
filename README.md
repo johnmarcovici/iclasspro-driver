@@ -128,14 +128,8 @@ CMD ["python", "iclasspro.py", "--email", "$EMAIL", "--password", "$PASSWORD", "
 where the arguments in brackets such as `<this argument>`
 means fill it in with your specific values and remove the brackets.
 
-### Combine Schedule Creation and Enrollment Steps
-You can perform the schedule generation and enrollment addition in one step by including the argument `--build-schedule` as in
-
-```console
-python iclasspro.py --email <email address> --password <password> --student-id <student ID> --schedule schedule.json --build-schedule
-```
-
 ### Promo Codes
+
 iClassPro no longer automatically includes promo codes, so you need to provide them explicitly.
 
 **Recommended**: Store your promo code in the `.env` file as `ICLASS_PROMO_CODE=YOURPROMOCODE`
