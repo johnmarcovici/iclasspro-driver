@@ -1,6 +1,8 @@
 # iClassPro
 Automate enrollments for classes offered with an iClassPro portal.
 
+**Note: This code has been rebuilt using Playwright for headless operation and autonomous execution.**
+
 ## Info
 ### Why Automate
 I decided to automate enrollments because the normal process is click-intensive and time consuming. It works fine for adding a single class, but for recurring schedules I wanted something easier.
@@ -19,54 +21,101 @@ I would prefer to operate on an API from iClassPro, but at present none is offer
 python -m venv venv && source ./venv/bin/activate && pip3 install -r requirements.txt
 ```
 
-### Install google-chrome
-Go here:
-https://www.google.com/chrome/?platform=linux&hl=en
-
-Press the Download Chrome button - it will download a .deb file, which you double-click to complete the installation.
-
-You can verify the install and check the version with
+### Install Playwright browsers
+After installing the requirements, install the Playwright browsers:
 
 ```console
-google-chrome-stable --version
-```
-You will need to install chromedriver (see next section) with the same major and minor release version, i.e. if the version is  
-
-```console
-Google Chrome 116.0.5845.140
+playwright install chromium
 ```
 
-you will need a chromedriver with version 116.0.5845.** where ** means any sub-version is OK.
+This will download and install Chromium, which Playwright uses for automation.
+### Configure Credentials
+For security and autonomous operation, store your credentials in a `.env` file:
 
-### Install chromedriver
-Go here:
-https://googlechromelabs.github.io/chrome-for-testing
+1. Copy the example file:
+   ```console
+   cp .env.example .env
+   ```
 
-Locate the table holding the version matching closest to what version you installed for google-chrome, and from within this table, locate the row that says **chromedriver** (not chrome). An example of a recent table with the pertinent row for a linux install is shown here:
+2. Edit `.env` with your actual credentials:
+   ```bash
+   ICLASS_EMAIL=your@email.com
+   ICLASS_PASSWORD=yourpassword
+   ICLASS_STUDENT_ID=12345
+   ICLASS_PROMO_CODE=YOURPROMOCODE  # Optional
+   ```
 
-<center>
-    <img src = chromedriver-install-page.png/>
-</center>
-
-Copy the URL from the table and paste into a new browser tab. It will download a zip file containing the chromedriver file. Copy that file to the same folder where you checkout this repository.
-
+**Security Note**: The `.env` file is automatically ignored by git to prevent accidental credential exposure.
 ## Run
 ### Create a Schedule
-The code processes a schedule as described in a json file with one dict per enrollment (class instance), an [example of which](./default_schedule.json) is included. You can copy and modify this schedule to suit your schedule, or build a new one with  
+The code processes a schedule as described in a JSON file with one dict per enrollment (class instance). An [example schedule](./default_schedule.json) is included. Copy and modify this schedule to suit your needs.
 
-```console
-python schedule_builder.py
+Example schedule.json:
+```json
+[
+  {
+    "Location": "El Segundo",
+    "Time": "12:00pm", 
+    "Day": "Monday"
+  },
+  {
+    "Location": "Culver",
+    "Time": "12:00pm",
+    "Day": "Tuesday"
+  }
+]
 ```
 
-which saves the resulting schedule to `schedule.json`.  
-
-You only need to update the schedule if it changes from your last session.
-
-### Add Enrollments
-Once you have a schedule you want to process, add enrollments with
+### Run the Automation
+With credentials configured in `.env`, simply run:
 
 ```console
-python iclasspro.py --email <email address> --password <password> --student-id <student ID> --schedule schedule.json
+python iclasspro.py
+```
+
+Or override specific values:
+```console
+python iclasspro.py --schedule custom_schedule.json --next-week
+```
+
+Use `--help` to see all available options.
+
+### Example Script
+An example bash script [`run_enrollment.sh`](./run_enrollment.sh) is provided for easy automation. Edit it with your credentials and schedule it with cron.
+
+## Autonomous Operation
+This tool is designed to run headless and can be automated using cron jobs, scheduled tasks, or CI/CD pipelines.
+
+### Using .env File (Recommended)
+The easiest way for autonomous operation is to configure credentials in a `.env` file as described in Setup. Then you can run the script without any arguments.
+
+### Example Cron Job (Linux/Mac)
+Add this to your crontab (`crontab -e`) to run every Monday at 6:00 AM:
+```bash
+0 6 * * 1 cd /path/to/iclasspro-driver && source venv/bin/activate && python iclasspro.py
+```
+
+### Environment Variables (Alternative)
+You can also set environment variables directly:
+```bash
+export ICLASS_EMAIL="your@email.com"
+export ICLASS_PASSWORD="yourpassword"
+export ICLASS_STUDENT_ID="12345"
+python iclasspro.py
+```
+
+### Docker Container
+For even more autonomous operation, you can containerize the application:
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+RUN playwright install chromium
+
+COPY . .
+CMD ["python", "iclasspro.py", "--email", "$EMAIL", "--password", "$PASSWORD", "--student-id", "$STUDENT_ID"]
 ```
 
 where the arguments in brackets such as `<this argument>`
@@ -80,9 +129,11 @@ python iclasspro.py --email <email address> --password <password> --student-id <
 ```
 
 ### Promo Codes
-As of April 2025, iClassPro is automatically including your promo code, if you have one, so that this tool no longer needs to populate it
-- However, if you find it is not being populated, supply an additional argument with
+iClassPro no longer automatically includes promo codes, so you need to provide them explicitly.
 
+**Recommended**: Store your promo code in the `.env` file as `ICLASS_PROMO_CODE=YOURPROMOCODE`
+
+**Alternative**: Pass as command line argument:
 ```console
 python iclasspro.py --promo-code <promo code> <... all other args ...>
 ```

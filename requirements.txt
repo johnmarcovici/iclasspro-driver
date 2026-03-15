@@ -1,3 +1,4 @@
-selenium
+playwright
+python-dotenv
 
 

@@ -2,13 +2,7 @@ import pathlib
 import tkinter as tk
 import json
 
-window = tk.Tk()
-
 locations_times_dict = json.load(open("./times_locations.json", "r"))
-locationvars = []
-timevars = []
-nextweekvar = tk.IntVar()
-saveasdefaultvar = tk.IntVar()
 
 
 def form_filename(file_stub: str = ""):
@@ -56,6 +50,12 @@ def process_schedule(output_schedule_filename: str = ""):
 
 
 def main(schedule: str = ""):
+    window = tk.Tk()
+    locationvars = []
+    timevars = []
+    nextweekvar = tk.IntVar()
+    saveasdefaultvar = tk.IntVar()
+
     window.title("SCAQ Schedule Builder")
     window.geometry("1200x150")
     window.geometry("+450+300")
