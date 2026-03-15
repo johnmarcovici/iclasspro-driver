@@ -22,7 +22,7 @@ python iclasspro.py
 
 ## Schedule Files (schedules/)
 - Default schedule: `schedules/schedule.json`
-- Example template: `schedules/default_schedule.json`
+- Template schedule: `schedules/template_schedule.json` (copy/modify to create your own)
 
 You can create your own schedules, then run with:
 ```bash

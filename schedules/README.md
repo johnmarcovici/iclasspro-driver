@@ -5,7 +5,7 @@ This directory contains JSON schedule files for the iClassPro automation tool.
 ## File Naming Convention
 
 - `schedule.json` - Default schedule file (used when no --schedule argument is provided)
-- `default_schedule.json` - Original example schedule
+- `template_schedule.json` - Example schedule template (copy & modify)
 - Custom schedules can use any name, e.g., `weekend_schedule.json`, `summer_schedule.json`
 
 ## Schedule Format
@@ -52,6 +52,6 @@ ICLASS_SCHEDULE=schedules/my_custom_schedule.json
 
 ## Creating Custom Schedules
 
-1. Copy `default_schedule.json` to a new file
+1. Copy `template_schedule.json` to a new file
 2. Edit the JSON with your desired classes
 3. Use the new file with the `--schedule` argument or `ICLASS_SCHEDULE` environment variable
