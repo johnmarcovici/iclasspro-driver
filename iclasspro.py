@@ -71,7 +71,13 @@ class iClassPro:
     def _get_cart_item_count(self) -> int:
         """Return an estimated number of cart items from the DOM."""
         try:
-            selectors = [".products-wrap .list-group-item", ".cart-item", ".cartItem", ".cart__item", "[role='listitem']"]
+            selectors = [
+                ".products-wrap .list-group-item",
+                ".cart-item",
+                ".cartItem",
+                ".cart__item",
+                "[role='listitem']",
+            ]
             for sel in selectors:
                 count = self.page.locator(sel).count()
                 if count > 0:
@@ -199,7 +205,9 @@ class iClassPro:
             path=f"after_add_to_cart_{class_index}.png", full_page=True
         )
 
-    def process_cart(self, promo_code: str = "", complete_transaction: bool = False) -> None:
+    def process_cart(
+        self, promo_code: str = "", complete_transaction: bool = False
+    ) -> None:
         """Navigates to the cart and completes checkout."""
         logging.info("Processing cart...")
         cart_url = self.base_url.rstrip("/") + "/cart"
@@ -279,7 +287,8 @@ def main():
     parser.add_argument(
         "--complete-transaction",
         action="store_true",
-        default=os.getenv("ICLASS_COMPLETE_TRANSACTION", "0").lower() in ("1", "true", "yes"),
+        default=os.getenv("ICLASS_COMPLETE_TRANSACTION", "0").lower()
+        in ("1", "true", "yes"),
         help="If set, actually complete the transaction by clicking the 'Complete Transaction' button.",
     )
     args = parser.parse_args()

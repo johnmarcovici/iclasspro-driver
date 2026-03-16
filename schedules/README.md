@@ -29,8 +29,8 @@ Each schedule file is a JSON array of objects with the following structure:
 
 ### Available Options
 
-**Locations**: "El Segundo", "Santa Monica", "Culver", "VNSO"  
-**Times**: "5:45am", "6:00am", "7:00am", "8:00am", "9:00am", "10:00am", "11:00am", "12:00pm"  
+**Locations**: "El Segundo", "Santa Monica", "Culver", "VNSO"
+**Times**: "5:45am", "6:00am", "7:00am", "8:00am", "9:00am", "10:00am", "11:00am", "12:00pm"
 **Days**: "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
 
 ## Usage

@@ -57,5 +57,3 @@ You can also override values at runtime via command line args (see `--help`).
 ## Notes
 - This tool uses Playwright and runs headless.
 - It works by automating browser actions (no official API).
-
-
