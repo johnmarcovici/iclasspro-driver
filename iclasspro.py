@@ -193,22 +193,21 @@ class iClassPro:
         logging.info(f"Found class link for {timestr}. Clicking to enroll.")
         class_link.first.click()
 
-        # Click "Enroll Now"
-        self.page.locator("button:has-text('Enroll Now')").click()
-        self.page.wait_for_timeout(1000)
+        # Wait for the "Enroll Now" button to be ready and click it
+        enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
+        enroll_now_button.wait_for(state="visible", timeout=15000)
+        enroll_now_button.click()
 
-        # Click "Add to Cart"
-        self.page.locator("button:has-text('Add to Cart')").click()
+        # Get the cart count *before* adding the new class
+        initial_cart_count = self._get_cart_item_count()
 
-        # Check for "already enrolled" or "added to cart" popups
-        try:
-            # Check for either message, whichever appears first
-            self.page.wait_for_selector(
-                "text=/is already enrolled|added to cart/i", timeout=10000
-            )
-            logging.info("Confirmed enrollment or item already in cart.")
-        except Exception:
-            logging.warning("Did not see confirmation toast for cart add.")
+        # Wait for the "Add to Cart" button to be ready and click it
+        add_to_cart_button = self.page.locator("button:has-text('Add to Cart')")
+        add_to_cart_button.wait_for(state="visible", timeout=15000)
+        add_to_cart_button.click()
+
+        # Wait for the cart item count to increase
+        self._wait_for_cart_item_count(min_count=initial_cart_count + 1)
 
         self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
 
@@ -236,11 +235,11 @@ class iClassPro:
             self.page.wait_for_timeout(2000)
 
         if complete_transaction:
-            logging.info("Proceeding to checkout...")
+            logging.info("Attempting to complete transaction...")
             self.page.locator("button:has-text('Complete Transaction')").click()
             # Final steps of checkout would go here
         else:
-            logging.info("Dry run: Skipping 'Complete Transaction' button click.")
+            logging.info("Dry run enabled. Skipping final transaction completion.")
 
         logging.info("Cart processing complete.")
 
