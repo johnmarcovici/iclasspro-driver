@@ -214,19 +214,6 @@ class iClassPro:
 
         self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
 
-    def _wait_for_cart_to_empty(self, timeout: int = 90000) -> None:
-        """Wait until the cart shows 0 items."""
-        logging.info("Waiting for cart to empty...")
-        deadline = time.time() + timeout / 1000.0
-        while time.time() < deadline:
-            count = self._get_cart_item_count()
-            if count == 0:
-                logging.info("Cart is now empty. Transaction likely successful.")
-                return
-            time.sleep(1)  # Check every second
-        logging.error("Timeout reached while waiting for cart to empty.")
-        raise RuntimeError("Transaction did not complete within the time limit.")
-
     def process_cart(
         self, promo_code: str = "", complete_transaction: bool = False
     ) -> None:
@@ -253,9 +240,10 @@ class iClassPro:
         if complete_transaction:
             logging.info("Attempting to complete transaction...")
             self.page.locator("button:has-text('Complete Transaction')").click()
-            self.take_screenshot("final_confirmation_page.png", full_page=True)
-            self._wait_for_cart_to_empty()
+            logging.info("Waiting 15 seconds for transaction to finalize...")
+            self.page.wait_for_timeout(15000)
             self.take_screenshot("transaction_complete.png", full_page=True)
+            logging.info("Transaction submitted.")
         else:
             logging.info("Dry run enabled. Skipping final transaction completion.")
 
