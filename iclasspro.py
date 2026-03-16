@@ -253,6 +253,7 @@ class iClassPro:
         if complete_transaction:
             logging.info("Attempting to complete transaction...")
             self.page.locator("button:has-text('Complete Transaction')").click()
+            self.take_screenshot("final_confirmation_page.png", full_page=True)
             self._wait_for_cart_to_empty()
             self.take_screenshot("transaction_complete.png", full_page=True)
         else:
