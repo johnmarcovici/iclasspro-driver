@@ -9,7 +9,7 @@ import time
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
+from playwright_stealth import Stealth
 
 # --- Basic Setup ---
 # Load environment variables from .env file
@@ -65,7 +65,7 @@ class iClassPro:
             """
         )
         self.page = self.context.new_page()
-        stealth_sync(self.page)
+        Stealth().apply_stealth_sync(self.page)
         logging.info("Browser launched successfully.")
 
     def _get_cart_item_count(self) -> int:
@@ -101,23 +101,39 @@ class iClassPro:
         logging.info("Navigating to login page...")
         login_url = self.base_url.rstrip("/") + "/login?showLogin=1"
         self.page.goto(login_url, wait_until="load")
+        self.page.wait_for_timeout(5000)
+        self.page.screenshot(path="01_after_goto_login.png")
+
+        # Handle "Select a location" modal if it appears
+        try:
+            location_button = self.page.locator("span:has-text('SCAQ')")
+            if location_button.is_visible(timeout=5000):
+                logging.info("Selecting location 'SCAQ'.")
+                location_button.click()
+                self.page.wait_for_timeout(2000)
+                self.page.wait_for_selector('input[type="email"]', timeout=10000)
+        except Exception as e:
+            logging.debug(f"Location selection modal not found, proceeding. Error: {e}")
 
         # Handle "Are you a current customer?" modal
         try:
             yes_button = self.page.locator("button:has-text('Yes')")
             if yes_button.is_visible(timeout=5000):
                 logging.info("Clicking 'Yes' on 'current customer' modal.")
+                self.page.screenshot(path="02_before_clicking_yes.png")
                 yes_button.click()
                 self.page.wait_for_timeout(1000)
+                self.page.screenshot(path="03_after_clicking_yes.png")
         except Exception:
             logging.debug("'Current customer' modal not found, proceeding.")
 
         # Fill credentials
         logging.info("Entering login credentials.")
-        self.page.screenshot(path="before_login_attempt.png")
-        self.page.get_by_label("Email").fill(email)
-        self.page.get_by_label("Password").fill(password)
-        self.page.get_by_label("Password").press("Enter")
+        self.page.screenshot(path="04_before_login_attempt.png")
+        self.page.locator("#email").fill(email)
+        self.page.locator("#password").fill(password)
+        self.page.screenshot(path="05_after_filling_credentials.png")
+        self.page.locator("#password").press("Enter")
 
         # Wait for successful login (e.g., by checking for a dashboard element)
         try:
