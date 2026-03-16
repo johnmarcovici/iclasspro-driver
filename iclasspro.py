@@ -199,7 +199,7 @@ class iClassPro:
             path=f"after_add_to_cart_{class_index}.png", full_page=True
         )
 
-    def process_cart(self, promo_code: str = "") -> None:
+    def process_cart(self, promo_code: str = "", complete_transaction: bool = False) -> None:
         """Navigates to the cart and completes checkout."""
         logging.info("Processing cart...")
         cart_url = self.base_url.rstrip("/") + "/cart"
@@ -221,10 +221,13 @@ class iClassPro:
             self.page.locator("button:has-text('Apply')").click()
             self.page.wait_for_timeout(2000)
 
-        logging.info("Proceeding to checkout...")
-        self.page.locator("button:has-text('Complete Transaction')").click()
+        if complete_transaction:
+            logging.info("Proceeding to checkout...")
+            self.page.locator("button:has-text('Complete Transaction')").click()
+            # Final steps of checkout would go here
+        else:
+            logging.info("Dry run: Skipping 'Complete Transaction' button click.")
 
-        # Final steps of checkout would go here
         logging.info("Cart processing complete.")
 
     def close(self):
@@ -273,6 +276,11 @@ def main():
         default=os.getenv("ICLASS_PROMO_CODE", ""),
         help="Promo code",
     )
+    parser.add_argument(
+        "--complete-transaction",
+        action="store_true",
+        help="If set, actually complete the transaction by clicking the 'Complete Transaction' button.",
+    )
     args = parser.parse_args()
 
     if not all([args.email, args.password, args.student_id]):
@@ -316,7 +324,10 @@ def main():
                 )
                 driver.page.screenshot(path=f"error_class_{i}.png")
 
-        driver.process_cart(promo_code=args.promo_code)
+        driver.process_cart(
+            promo_code=args.promo_code,
+            complete_transaction=args.complete_transaction,
+        )
         logging.info("All operations completed.")
 
     except Exception as e:
