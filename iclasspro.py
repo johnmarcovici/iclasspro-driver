@@ -185,13 +185,16 @@ class iClassPro:
         self.page.goto(booking_url, wait_until="load")
         self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
 
-        # Find the link for the class time
+        # Find the link for the class time, waiting for it to appear
         class_link = self.page.locator(f"a:has-text('at {timestr}')")
-        if class_link.count() == 0:
-            raise RuntimeError(f"Could not find class at {timestr}.")
-
-        logging.info(f"Found class link for {timestr}. Clicking to enroll.")
-        class_link.first.click()
+        try:
+            class_link.first.wait_for(state="visible", timeout=20000)
+            logging.info(f"Found class link for {timestr}. Clicking to enroll.")
+            class_link.first.click()
+        except Exception:
+            raise RuntimeError(
+                f"Could not find class at {timestr} within the time limit."
+            )
 
         # Wait for the "Enroll Now" button to be ready and click it
         enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
