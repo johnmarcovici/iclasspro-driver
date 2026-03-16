@@ -215,14 +215,9 @@ class iClassPro:
 
         if promo_code:
             logging.info(f"Applying promo code: {promo_code}")
-            
-            # Click "Use Promo Code" link if the input is not visible
-            promo_input = self.page.locator("[name='promoCode']")
-            if not promo_input.is_visible():
-                self.page.locator("a:has-text('Use Promo Code')").click()
-                self.page.wait_for_timeout(1000)
-                
-            promo_input.fill(promo_code)
+            self.page.locator("a:has-text('Use Promo Code')").click()
+            self.page.wait_for_timeout(1000)
+            self.page.locator("[name='promoCode']").fill(promo_code)
             self.page.locator("button:has-text('Apply')").click()
             self.page.wait_for_timeout(2000)
 
