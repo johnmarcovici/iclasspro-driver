@@ -222,7 +222,7 @@ class iClassPro:
             self.page.wait_for_timeout(2000)
 
         logging.info("Proceeding to checkout...")
-        self.page.locator("button:has-text('Pay Now')").click()
+        self.page.locator("button:has-text('Complete Transaction')").click()
 
         # Final steps of checkout would go here
         logging.info("Cart processing complete.")
