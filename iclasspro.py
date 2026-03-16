@@ -71,7 +71,7 @@ class iClassPro:
     def _get_cart_item_count(self) -> int:
         """Return an estimated number of cart items from the DOM."""
         try:
-            selectors = [".cart-item", ".cartItem", ".cart__item", "[role='listitem']"]
+            selectors = [".products-wrap .list-group-item", ".cart-item", ".cartItem", ".cart__item", "[role='listitem']"]
             for sel in selectors:
                 count = self.page.locator(sel).count()
                 if count > 0:
@@ -215,12 +215,19 @@ class iClassPro:
 
         if promo_code:
             logging.info(f"Applying promo code: {promo_code}")
-            self.page.locator("[name='promoCode']").fill(promo_code)
+            
+            # Click "Use Promo Code" link if the input is not visible
+            promo_input = self.page.locator("[name='promoCode']")
+            if not promo_input.is_visible():
+                self.page.locator("a:has-text('Use Promo Code')").click()
+                self.page.wait_for_timeout(1000)
+                
+            promo_input.fill(promo_code)
             self.page.locator("button:has-text('Apply')").click()
             self.page.wait_for_timeout(2000)
 
         logging.info("Proceeding to checkout...")
-        self.page.locator("button:has-text('Proceed to Checkout')").click()
+        self.page.locator("button:has-text('Pay Now')").click()
 
         # Final steps of checkout would go here
         logging.info("Cart processing complete.")
