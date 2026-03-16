@@ -7,3 +7,5 @@ schedules/schedule.json
 schedules/*.json
 # But do not ignore the template schedule
 !schedules/template_schedule.json
+
+screenshots/

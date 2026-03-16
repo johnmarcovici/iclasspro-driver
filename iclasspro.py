@@ -13,7 +13,7 @@ from playwright_stealth import Stealth
 
 # --- Basic Setup ---
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(override=True)
 
 # Configure logging
 logging.basicConfig(
@@ -24,12 +24,21 @@ logging.basicConfig(
 
 
 class iClassPro:
-    def __init__(self, base_url: str = ""):
+    def __init__(self, base_url: str = "", save_screenshots: bool = False):
         self.base_url = base_url
+        self.save_screenshots = save_screenshots
         self.playwright = None
         self.browser = None
         self.page = None
         self._last_cart_response = None
+
+    def take_screenshot(self, filename: str, full_page: bool = False):
+        """Helper to save a screenshot if --save-screenshots is enabled."""
+        if self.save_screenshots and self.page:
+            os.makedirs("screenshots", exist_ok=True)
+            self.page.screenshot(
+                path=os.path.join("screenshots", filename), full_page=full_page
+            )
 
     def webdriver(self) -> None:
         """Initialize Playwright and launch a browser instance."""
@@ -108,7 +117,7 @@ class iClassPro:
         login_url = self.base_url.rstrip("/") + "/login?showLogin=1"
         self.page.goto(login_url, wait_until="load")
         self.page.wait_for_timeout(5000)
-        self.page.screenshot(path="01_after_goto_login.png")
+        self.take_screenshot("01_after_goto_login.png")
 
         # Handle "Select a location" modal if it appears
         try:
@@ -126,19 +135,19 @@ class iClassPro:
             yes_button = self.page.locator("button:has-text('Yes')")
             if yes_button.is_visible(timeout=5000):
                 logging.info("Clicking 'Yes' on 'current customer' modal.")
-                self.page.screenshot(path="02_before_clicking_yes.png")
+                self.take_screenshot("02_before_clicking_yes.png")
                 yes_button.click()
                 self.page.wait_for_timeout(1000)
-                self.page.screenshot(path="03_after_clicking_yes.png")
+                self.take_screenshot("03_after_clicking_yes.png")
         except Exception:
             logging.debug("'Current customer' modal not found, proceeding.")
 
         # Fill credentials
         logging.info("Entering login credentials.")
-        self.page.screenshot(path="04_before_login_attempt.png")
+        self.take_screenshot("04_before_login_attempt.png")
         self.page.locator("#email").fill(email)
         self.page.locator("#password").fill(password)
-        self.page.screenshot(path="05_after_filling_credentials.png")
+        self.take_screenshot("05_after_filling_credentials.png")
         self.page.locator("#password").press("Enter")
 
         # Wait for successful login (e.g., by checking for a dashboard element)
@@ -147,7 +156,7 @@ class iClassPro:
             logging.info("Login successful.")
         except Exception:
             logging.error("Login failed. Could not find 'My Account' text after login.")
-            self.page.screenshot(path="login_failure.png")
+            self.take_screenshot("login_failure.png")
             raise RuntimeError("Login failed. Please check credentials and portal URL.")
 
     def enroll(
@@ -174,7 +183,7 @@ class iClassPro:
         booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
 
         self.page.goto(booking_url, wait_until="load")
-        self.page.screenshot(path=f"classes_page_{class_index}.png", full_page=True)
+        self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
 
         # Find the link for the class time
         class_link = self.page.locator(f"a:has-text('at {timestr}')")
@@ -201,9 +210,7 @@ class iClassPro:
         except Exception:
             logging.warning("Did not see confirmation toast for cart add.")
 
-        self.page.screenshot(
-            path=f"after_add_to_cart_{class_index}.png", full_page=True
-        )
+        self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
 
     def process_cart(
         self, promo_code: str = "", complete_transaction: bool = False
@@ -214,8 +221,7 @@ class iClassPro:
         self.page.goto(cart_url, wait_until="load")
         self.page.wait_for_timeout(5000)  # Extra wait for cart to render fully
 
-        self.page.screenshot(path="cart_final.png", full_page=True)
-        logging.info("Saved final cart screenshot to cart_final.png")
+        self.take_screenshot("cart_final.png", full_page=True)
 
         if self._get_cart_item_count() == 0:
             logging.warning("Cart is empty. Nothing to process.")
@@ -291,6 +297,13 @@ def main():
         in ("1", "true", "yes"),
         help="If set, actually complete the transaction by clicking the 'Complete Transaction' button.",
     )
+    parser.add_argument(
+        "--save-screenshots",
+        action="store_true",
+        default=os.getenv("ICLASS_SAVE_SCREENSHOTS", "0").lower()
+        in ("1", "true", "yes"),
+        help="If set, save screenshots during the process.",
+    )
     args = parser.parse_args()
 
     if not all([args.email, args.password, args.student_id]):
@@ -304,7 +317,7 @@ def main():
     logging.info(f"Student ID: {args.student_id}")
     logging.info(f"Using schedule: {args.schedule}")
 
-    driver = iClassPro(base_url=args.base_url)
+    driver = iClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
     try:
         with open(args.schedule, "r") as f:
             schedule = json.load(f)
@@ -332,7 +345,7 @@ def main():
                 logging.error(
                     f"Failed to enroll in class {class_info}: {e}", exc_info=True
                 )
-                driver.page.screenshot(path=f"error_class_{i}.png")
+                driver.take_screenshot(f"error_class_{i}.png")
 
         driver.process_cart(
             promo_code=args.promo_code,
