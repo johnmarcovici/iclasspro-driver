@@ -1,11 +1,6 @@
-venv/*
-__pycache__
-chromedriver
+venv/
+__pycache__/
 .env
-schedules/schedule.json
-# Ignore all schedule json files
-schedules/*.json
-# But do not ignore the template schedule
-!schedules/template_schedule.json
-
+*.pyc
 screenshots/
+*.log

@@ -1,0 +1,37 @@
+[
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Monday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Tuesday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Wednesday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Thursday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "5:45am",
+    "Day": "Friday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "10:00am",
+    "Day": "Saturday"
+  },
+  {
+    "Location": "El Segundo",
+    "Time": "10:00am",
+    "Day": "Sunday"
+  }
+]

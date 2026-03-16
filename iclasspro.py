@@ -5,7 +5,10 @@ import json
 import logging
 import os
 import re
+import smtplib
 import time
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -15,15 +18,43 @@ from playwright_stealth import Stealth
 # Load environment variables from .env file
 load_dotenv(override=True)
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+# --- Email Function ---
+def send_log_email(
+    log_file_path,
+    to_addr,
+    from_addr,
+    app_password,
+    smtp_server,
+    smtp_port,
+    subject_status,
+):
+    """Reads the log file and sends its content in an email."""
+    try:
+        with open(log_file_path, "r") as f:
+            log_content = f.read()
+
+        msg = MIMEMultipart()
+        msg["Subject"] = f"iClassPro Enrollment Log ({subject_status})"
+        msg["From"] = from_addr
+        msg["To"] = to_addr
+        msg.attach(MIMEText(log_content, "plain"))
+
+        logging.info("Connecting to SMTP server to send log email...")
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(from_addr, app_password)
+            server.send_message(msg)
+        logging.info("Log email sent successfully.")
+
+    except Exception as e:
+        logging.error(f"Failed to send log email: {e}", exc_info=True)
 
 
-class iClassPro:
+# --- Main Class ---
+
+
+class IClassPro:
     def __init__(self, base_url: str = "", save_screenshots: bool = False):
         self.base_url = base_url
         self.save_screenshots = save_screenshots
@@ -309,7 +340,34 @@ def main():
         in ("1", "true", "yes"),
         help="If set, save screenshots during the process.",
     )
+    parser.add_argument(
+        "--send-email",
+        action="store_true",
+        default=os.getenv("ICLASS_SEND_EMAIL", "0").lower() in ("1", "true", "yes"),
+        help="If set, send the log file via email after completion.",
+    )
     args = parser.parse_args()
+
+    # --- Setup Logging ---
+    log_file = "iclasspro.log"
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    # Create a formatter
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    # Remove any existing handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    # Create a file handler
+    file_handler = logging.FileHandler(log_file, mode="w")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    # Create a stream handler (for console output)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
 
     if not all([args.email, args.password, args.student_id]):
         logging.error(
@@ -318,19 +376,19 @@ def main():
         exit(1)
 
     logging.info(f"Starting iClassPro enrollment bot for email: {args.email}")
-    logging.info(f"Password: {args.password}")
+    logging.info(
+        f"Password: {'*' * len(args.password) if args.password else 'Not set'}"
+    )
     logging.info(f"Student ID: {args.student_id}")
     logging.info(f"Using schedule: {args.schedule}")
 
-    driver = iClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
+    driver = IClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
+    main_exception = None
+
     try:
         with open(args.schedule, "r") as f:
             schedule = json.load(f)
-    except FileNotFoundError:
-        logging.error(f"Schedule file not found at {args.schedule}")
-        exit(1)
 
-    try:
         driver.webdriver()
         driver.login(email=args.email, password=args.password)
 
@@ -360,8 +418,35 @@ def main():
 
     except Exception as e:
         logging.critical(f"A critical error occurred: {e}", exc_info=True)
+        main_exception = e
     finally:
         driver.close()
+
+        if args.send_email:
+            logging.info("Email sending is enabled. Checking credentials...")
+            to_addr = os.getenv("ICLASS_EMAIL_TO")
+            from_addr = os.getenv("ICLASS_EMAIL_FROM")
+            app_password = os.getenv("ICLASS_APP_PASSWORD")
+            smtp_server = os.getenv("ICLASS_SMTP_SERVER")
+            smtp_port = int(os.getenv("ICLASS_SMTP_PORT", 587))
+
+            if all([to_addr, from_addr, app_password, smtp_server]):
+                status = "FAILURE" if main_exception else "SUCCESS"
+                send_log_email(
+                    log_file,
+                    to_addr,
+                    from_addr,
+                    app_password,
+                    smtp_server,
+                    smtp_port,
+                    status,
+                )
+            else:
+                logging.warning(
+                    "Cannot send log email. Missing one or more required environment variables: "
+                    "ICLASS_EMAIL_TO, ICLASS_EMAIL_FROM, ICLASS_APP_PASSWORD, ICLASS_SMTP_SERVER"
+                )
+        logging.info("Script finished.")
 
 
 if __name__ == "__main__":
