@@ -424,9 +424,9 @@ def main():
 
         if args.send_email:
             logging.info("Email sending is enabled. Checking credentials...")
-            to_addr = os.getenv("ICLASS_EMAIL_TO")
-            from_addr = os.getenv("ICLASS_EMAIL_FROM")
-            app_password = os.getenv("ICLASS_APP_PASSWORD")
+            to_addr = args.email
+            from_addr = args.email
+            app_password = os.getenv("ICLASS_EMAIL_APP_PASSWORD")
             smtp_server = os.getenv("ICLASS_SMTP_SERVER")
             smtp_port = int(os.getenv("ICLASS_SMTP_PORT", 587))
 
@@ -443,8 +443,7 @@ def main():
                 )
             else:
                 logging.warning(
-                    "Cannot send log email. Missing one or more required environment variables: "
-                    "ICLASS_EMAIL_TO, ICLASS_EMAIL_FROM, ICLASS_APP_PASSWORD, ICLASS_SMTP_SERVER"
+                    "Cannot send log email. Missing one or more required environment variables."
                 )
         logging.info("Script finished.")
 
