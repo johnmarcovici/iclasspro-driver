@@ -91,6 +91,7 @@ async def save_schedule(request: ScheduleSaveRequest):
 @app.websocket("/ws/run")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    process = None
 
     try:
         # First message should be the configuration JSON
@@ -162,14 +163,31 @@ async def websocket_endpoint(websocket: WebSocket):
         if process.returncode == 0:
             await websocket.send_text("Automation completed successfully.")
         else:
-            await websocket.send_text(
-                f"Automation failed with exit code {process.returncode}."
-            )
+            # Only send failed message if we didn't deliberately kill it
+            if process.returncode != -15 and process.returncode != -9:
+                await websocket.send_text(
+                    f"Automation failed with exit code {process.returncode}."
+                )
 
+    except WebSocketDisconnect:
+        # Expected behavior when user closes the tab or clicks Stop
+        pass
     except Exception as e:
-        await websocket.send_text(f"Error starting automation: {str(e)}")
+        try:
+            await websocket.send_text(f"Error: {str(e)}")
+        except Exception:
+            pass  # Socket might already be closed
     finally:
-        await websocket.close()
+        # CRITICAL: Kill the subprocess if it's still running when the connection drops
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
