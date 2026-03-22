@@ -406,8 +406,11 @@
             }
         }
 
+        let isStopped = false;
+
         function stopAutomation() {
             if (ws) {
+                isStopped = true;
                 ws.close();
                 updateStatus("idle", "Stopped by user");
             }
@@ -463,6 +466,7 @@
             terminal.innerHTML = "";
             resetBadges();
             updateStatus("running", "Running...");
+            isStopped = false;
 
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const wsUrl = `${protocol}//${window.location.host}/ws/run`;
@@ -484,8 +488,12 @@
             };
 
             ws.onclose = function(event) {
+                if (isStopped) return; // Status already set by stopAutomation
+
                 if (terminal.innerHTML.includes("successfully")) {
-                    updateStatus("success", "Completed Successfully");
+                    const total = document.querySelectorAll(".schedule-row").length;
+                    const done = document.querySelectorAll(".status-done").length;
+                    updateStatus("success", `Completed: Added ${done} of ${total} scheduled classes`);
                 } else if (terminal.innerHTML.includes("failed") || terminal.innerHTML.includes("Error")) {
                     updateStatus("error", "Failed");
                 } else {
