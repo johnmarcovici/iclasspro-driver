@@ -80,6 +80,11 @@
         .password-toggle:hover {
             opacity: 1;
         }
+
+        .clear-btn:hover {
+            background-color: #dc3545 !important;
+            color: white !important;
+        }
     </style>
 </head>
 <body>
@@ -145,7 +150,10 @@
             <div id="schedule-container">
                 <!-- Schedule rows will be injected here -->
             </div>
-            <button class="secondary" onclick="addScheduleRow()" style="margin-top: 1rem;">+ Add another class</button>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
+                <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
+            </div>
         </details>
 
         <section style="margin-top: 2rem;">
@@ -377,6 +385,14 @@
             document.querySelectorAll(".status-badge").forEach(badge => {
                 badge.className = "status-badge";
             });
+        }
+
+        function clearSchedule() {
+            if (confirm("Are you sure you want to clear the entire schedule?")) {
+                scheduleContainer.innerHTML = '';
+                rowCount = 0;
+                addScheduleRow(); // Add one empty row so it's not totally blank
+            }
         }
 
         function updateStatus(state, text) {
