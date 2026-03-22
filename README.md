@@ -69,7 +69,7 @@ The bot uses simple JSON files to define which classes to enroll in. You can cre
 
 Use the `.env` file to store sensitive values. This file is ignored by Git, so your secrets are safe. See `.env.example` for all available options.
 
-## Automation
+## 🤖 Automation
 
 For automated runs, you can call the `run_enrollment.sh` script from a cron job. This is the simplest way to ensure the environment is set up correctly.
 
