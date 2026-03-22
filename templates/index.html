@@ -340,13 +340,13 @@
 
             div.innerHTML = `
                 <div class="status-badge" id="status-${rowId}" title="Pending"></div>
+                <select class="day-input">
+                    ${dayOptions}
+                </select>
                 <div style="flex:1;">
                     ${locSelectHtml}
                     ${locInputHtml}
                 </div>
-                <select class="day-input">
-                    ${dayOptions}
-                </select>
                 <div style="flex:1;">
                     ${timeSelectHtml}
                     ${timeInputHtml}
