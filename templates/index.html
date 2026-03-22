@@ -394,6 +394,7 @@
             scheduleContainer.innerHTML = '';
             rowCount = 0;
             addScheduleRow(); // Add one empty row so it's not totally blank
+            document.getElementById('schedule-select').value = ''; // Reset dropdown
         }
 
         function updateStatus(state, text) {
