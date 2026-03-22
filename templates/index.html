@@ -194,6 +194,206 @@
             }
         };
 
+        function togglePassword() {
+            const passwordInput = document.getElementById("password");
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+            } else {
+                passwordInput.type = "password";
+            }
+        }
+
+        async function fetchSchedules() {
+            try {
+                const response = await fetch('/api/schedules');
+                const schedules = await response.json();
+                const select = document.getElementById('schedule-select');
+                select.innerHTML = '<option value="">Select a schedule...</option>';
+                schedules.forEach(filename => {
+                    const option = document.createElement('option');
+                    option.value = filename;
+                    option.textContent = filename;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Failed to fetch schedules:", error);
+            }
+        }
+
+        async function loadSchedule() {
+            const select = document.getElementById('schedule-select');
+            const filename = select.value;
+            if (!filename) return;
+
+            try {
+                const response = await fetch(`/api/schedules/${filename}`);
+                if (!response.ok) {
+                    alert("Failed to load schedule");
+                    return;
+                }
+                const schedule = await response.json();
+
+                // Clear existing
+                scheduleContainer.innerHTML = '';
+                rowCount = 0; // reset counter
+
+                if (schedule && schedule.length > 0) {
+                    schedule.forEach(cls => {
+                        addScheduleRow(cls.Location, cls.Day, cls.Time);
+                    });
+                } else {
+                    addScheduleRow();
+                }
+
+                document.getElementById('schedule-name').value = filename;
+            } catch (error) {
+                console.error("Error loading schedule:", error);
+                alert("Error loading schedule");
+            }
+        }
+
+        async function saveSchedule() {
+            let filename = document.getElementById('schedule-name').value.trim();
+            if (!filename) {
+                alert("Please enter a filename to save the schedule.");
+                return;
+            }
+            if (!filename.endsWith('.json')) {
+                filename += '.json';
+            }
+
+            const scheduleData = getScheduleData();
+            const payload = scheduleData.map(item => ({
+                Location: item.Location,
+                Day: item.Day,
+                Time: item.Time
+            }));
+
+            try {
+                const response = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: filename,
+                        schedule: payload
+                    })
+                });
+
+                if (response.ok) {
+                    alert("Schedule saved successfully!");
+                    fetchSchedules(); // refresh dropdown
+                } else {
+                    alert("Failed to save schedule.");
+                }
+            } catch (error) {
+                console.error("Error saving schedule:", error);
+                alert("Error saving schedule");
+            }
+        }
+
+        function addScheduleRow(loc = "", day = "Monday", time = "") {
+            const rowId = `row-${rowCount++}`;
+            const div = document.createElement("div");
+            div.className = "schedule-row";
+            div.id = rowId;
+
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
+
+            // Location
+            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo"];
+            let isCustomLoc = loc && !predefinedLocs.includes(loc);
+            let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
+            if (isCustomLoc) {
+                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
+            } else if (!loc) {
+                locOptions = `<option value="" disabled selected>Location...</option>` + locOptions;
+            }
+            locOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let locSelectHtml = `<select class="loc-input" style="${isCustomLoc ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${locOptions}</select>`;
+            let locInputHtml = `
+                <div class="custom-input-wrapper" style="display:${isCustomLoc ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
+                    <input type="text" class="loc-input-text" placeholder="Custom Location..." value="${isCustomLoc ? loc : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomLoc ? 'required' : ''}>
+                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
+                </div>
+            `;
+
+            // Time
+            const predefinedTimes = ["5:45am", "7:00am", "9:00am", "10:00am", "10:30am", "12:00pm"];
+            let isCustomTime = time && !predefinedTimes.includes(time);
+            let timeOptions = predefinedTimes.map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join("");
+            if (isCustomTime) {
+                timeOptions = `<option value="${time}" selected>${time}</option>` + timeOptions;
+            } else if (!time) {
+                timeOptions = `<option value="" disabled selected>Time...</option>` + timeOptions;
+            }
+            timeOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let timeSelectHtml = `<select class="time-input" style="${isCustomTime ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${timeOptions}</select>`;
+            let timeInputHtml = `
+                <div class="custom-input-wrapper" style="display:${isCustomTime ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
+                    <input type="text" class="time-input-text" placeholder="Custom Time..." value="${isCustomTime ? time : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomTime ? 'required' : ''}>
+                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
+                </div>
+            `;
+
+            div.innerHTML = `
+                <div class="status-badge" id="status-${rowId}" title="Pending"></div>
+                <div style="flex:1;">
+                    ${locSelectHtml}
+                    ${locInputHtml}
+                </div>
+                <select class="day-input">
+                    ${dayOptions}
+                </select>
+                <div style="flex:1;">
+                    ${timeSelectHtml}
+                    ${timeInputHtml}
+                </div>
+                <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
+            `;
+            scheduleContainer.appendChild(div);
+        }
+
+        function getScheduleData() {
+            const rows = document.querySelectorAll(".schedule-row");
+            const schedule = [];
+            rows.forEach(row => {
+                const locSelect = row.querySelector(".loc-input");
+                const locInput = row.querySelector(".loc-input-text");
+                const loc = locSelect.style.display === 'none' ? locInput.value.trim() : locSelect.value.trim();
+
+                const day = row.querySelector(".day-input").value;
+
+                const timeSelect = row.querySelector(".time-input");
+                const timeInput = row.querySelector(".time-input-text");
+                const time = timeSelect.style.display === 'none' ? timeInput.value.trim() : timeSelect.value.trim();
+
+                if (loc && time && loc !== '__CUSTOM__' && time !== '__CUSTOM__') {
+                    schedule.push({
+                        "Location": loc,
+                        "Day": day,
+                        "Time": time,
+                        "rowId": row.id // keep track of rowId to update status
+                    });
+                }
+            });
+            return schedule;
+        }
+
+        function resetBadges() {
+            document.querySelectorAll(".status-badge").forEach(badge => {
+                badge.className = "status-badge";
+            });
+        }
+
+        function clearSchedule() {
+            scheduleContainer.innerHTML = '';
+            rowCount = 0;
+            addScheduleRow(); // Add one empty row so it's not totally blank
+        }
+
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
             statusIndicator.innerText = text;
