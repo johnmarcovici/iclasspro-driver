@@ -251,9 +251,19 @@
             const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
+            const locations = ["El Segundo", "Santa Monica", "Culver", "Echo"];
+            let locOptions = locations.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
+            if (loc && !locations.includes(loc)) {
+                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
+            } else if (!loc) {
+                locOptions = `<option value="" disabled ${!loc ? 'selected' : ''}>Location...</option>` + locOptions;
+            }
+
             div.innerHTML = `
                 <div class="status-badge" id="status-${rowId}" title="Pending"></div>
-                <input type="text" class="loc-input" placeholder="Location (e.g. El Segundo)" value="${loc}" required>
+                <select class="loc-input" required>
+                    ${locOptions}
+                </select>
                 <select class="day-input">
                     ${dayOptions}
                 </select>
