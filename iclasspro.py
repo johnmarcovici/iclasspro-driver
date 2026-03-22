@@ -219,9 +219,15 @@ class IClassPro:
         # Find the link for the class time, waiting for it to appear
         class_link = self.page.locator(f"a:has-text('at {timestr}')")
         try:
+            # Wait for at least one to be visible
             class_link.first.wait_for(state="visible", timeout=20000)
-            logging.info(f"Found class link for {timestr}. Clicking to enroll.")
-            class_link.first.click()
+
+            # If there are multiple (e.g., this week and next week), pick the last one
+            count = class_link.count()
+            logging.info(
+                f"Found {count} class link(s) for {timestr}. Clicking the latest one to enroll."
+            )
+            class_link.last.click()
         except Exception:
             raise RuntimeError(
                 f"Could not find class at {timestr} within the time limit."
