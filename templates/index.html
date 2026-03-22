@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>iClassPro Enrollment Dashboard</title>
-    <!-- Use PicoCSS for a clean, minimal look without writing custom CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <style>
         #terminal {
@@ -22,6 +21,39 @@
         .status-running { color: #ffc107; font-weight: bold;}
         .status-success { color: #28a745; font-weight: bold;}
         .status-error { color: #dc3545; font-weight: bold;}
+
+        .schedule-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .schedule-row select, .schedule-row input {
+            margin-bottom: 0;
+            width: auto;
+            flex: 1;
+        }
+        .delete-btn {
+            width: auto;
+            margin-bottom: 0;
+            background-color: #dc3545;
+            border-color: #dc3545;
+            padding: 0.5rem 1rem;
+        }
+        .delete-btn:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
+        }
+        .status-badge {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+        .status-processing { background-color: #ffc107; }
+        .status-done { background-color: #28a745; }
+        .status-failed { background-color: #dc3545; }
     </style>
 </head>
 <body>
@@ -31,10 +63,44 @@
             <h2>Automate your class signups</h2>
         </hgroup>
 
-        <section>
+        <!-- Configuration Settings -->
+        <details open>
+            <summary><strong>Configuration & Credentials</strong></summary>
+            <div class="grid">
+                <label>
+                    Email
+                    <input type="email" id="email" value="{{ email }}" required>
+                </label>
+                <label>
+                    Password
+                    <input type="password" id="password" value="{{ password }}" required>
+                </label>
+            </div>
+            <div class="grid">
+                <label>
+                    Student ID
+                    <input type="number" id="student_id" value="{{ student_id }}" required>
+                </label>
+                <label>
+                    Promo Code (Optional)
+                    <input type="text" id="promo_code" value="{{ promo_code }}">
+                </label>
+            </div>
+        </details>
+
+        <!-- Schedule Editor -->
+        <details open>
+            <summary><strong>Class Schedule</strong></summary>
+            <div id="schedule-container">
+                <!-- Schedule rows will be injected here -->
+            </div>
+            <button class="secondary" onclick="addScheduleRow()" style="margin-top: 1rem;">+ Add another class</button>
+        </details>
+
+        <section style="margin-top: 2rem;">
             <div class="grid">
                 <div>
-                    <button id="run-button" onclick="startAutomation()">Run Enrollment Schedule</button>
+                    <button id="run-button" onclick="startAutomation()">▶ Run Enrollment Schedule</button>
                     <p>Status: <span id="status-indicator" class="status-idle">Idle</span></p>
                 </div>
             </div>
@@ -47,11 +113,71 @@
     </main>
 
     <script>
+        const initialSchedule = {{ initial_schedule | tojson | safe }};
         const terminal = document.getElementById("terminal");
         const statusIndicator = document.getElementById("status-indicator");
         const runButton = document.getElementById("run-button");
+        const scheduleContainer = document.getElementById("schedule-container");
 
         let ws = null;
+        let rowCount = 0;
+
+        // Initialize the schedule grid
+        window.onload = function() {
+            if (initialSchedule && initialSchedule.length > 0) {
+                initialSchedule.forEach(cls => {
+                    addScheduleRow(cls.Location, cls.Day, cls.Time);
+                });
+            } else {
+                addScheduleRow(); // Add one empty row by default
+            }
+        };
+
+        function addScheduleRow(loc = "", day = "Monday", time = "") {
+            const rowId = `row-${rowCount++}`;
+            const div = document.createElement("div");
+            div.className = "schedule-row";
+            div.id = rowId;
+
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
+
+            div.innerHTML = `
+                <div class="status-badge" id="status-${rowId}" title="Pending"></div>
+                <input type="text" class="loc-input" placeholder="Location (e.g. El Segundo)" value="${loc}" required>
+                <select class="day-input">
+                    ${dayOptions}
+                </select>
+                <input type="text" class="time-input" placeholder="Time (e.g. 5:45am)" value="${time}" required>
+                <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
+            `;
+            scheduleContainer.appendChild(div);
+        }
+
+        function getScheduleData() {
+            const rows = document.querySelectorAll(".schedule-row");
+            const schedule = [];
+            rows.forEach(row => {
+                const loc = row.querySelector(".loc-input").value.trim();
+                const day = row.querySelector(".day-input").value;
+                const time = row.querySelector(".time-input").value.trim();
+                if (loc && time) {
+                    schedule.push({
+                        "Location": loc,
+                        "Day": day,
+                        "Time": time,
+                        "rowId": row.id // keep track of rowId to update status
+                    });
+                }
+            });
+            return schedule;
+        }
+
+        function resetBadges() {
+            document.querySelectorAll(".status-badge").forEach(badge => {
+                badge.className = "status-badge";
+            });
+        }
 
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
@@ -64,29 +190,76 @@
         }
 
         function appendToTerminal(text) {
-            // Append text
             terminal.innerHTML += text + "<br>";
-            // Auto-scroll to bottom
             terminal.scrollTop = terminal.scrollHeight;
+
+            // Very simple visual feedback parsing based on logs
+            // (A more robust solution would send structured JSON events from the Python script)
+            const scheduleData = getScheduleData(); // re-fetch to get current order
+
+            if (text.includes("--- Processing class")) {
+                // E.g. "--- Processing class 1/2" -> extract index 1
+                const match = text.match(/Processing class (\d+)\//);
+                if (match) {
+                    const idx = parseInt(match[1]) - 1;
+                    if (scheduleData[idx]) {
+                        const badgeId = `status-${scheduleData[idx].rowId}`;
+                        const badge = document.getElementById(badgeId);
+                        if (badge) badge.className = "status-badge status-processing";
+                    }
+                }
+            } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment")) {
+                // If we see these, it usually means the class processing finished.
+                // We'll mark the currently "processing" one as done (green).
+                const processingBadge = document.querySelector(".status-processing");
+                if (processingBadge) processingBadge.className = "status-badge status-done";
+            } else if (text.includes("ERROR - Failed to enroll")) {
+                 const processingBadge = document.querySelector(".status-processing");
+                 if (processingBadge) processingBadge.className = "status-badge status-failed";
+            }
         }
 
         function startAutomation() {
-            // Clear previous terminal output
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            const student_id = document.getElementById("student_id").value;
+            const promo_code = document.getElementById("promo_code").value;
+            const schedule = getScheduleData();
+
+            if (!email || !password || !student_id) {
+                alert("Please fill in all credentials.");
+                return;
+            }
+
+            if (schedule.length === 0) {
+                alert("Please add at least one valid class to the schedule.");
+                return;
+            }
+
             terminal.innerHTML = "";
+            resetBadges();
             updateStatus("running", "Running...");
 
-            // Determine WebSocket protocol based on page protocol
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const wsUrl = `${protocol}//${window.location.host}/ws/run`;
-
             ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                // Send configuration as the first message
+                ws.send(JSON.stringify({
+                    email: email,
+                    password: password,
+                    student_id: student_id,
+                    promo_code: promo_code,
+                    schedule: schedule
+                }));
+            };
 
             ws.onmessage = function(event) {
                 appendToTerminal(event.data);
             };
 
             ws.onclose = function(event) {
-                // If it closed normally or due to completion
                 if (terminal.innerHTML.includes("successfully")) {
                     updateStatus("success", "Completed Successfully");
                 } else if (terminal.innerHTML.includes("failed") || terminal.innerHTML.includes("Error")) {

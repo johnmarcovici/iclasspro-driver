@@ -1,42 +1,107 @@
 import asyncio
+import json
 import os
 import sys
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+# Load environment variables
+load_dotenv(override=True)
+
 app = FastAPI(title="iClassPro Enrollment Dashboard")
 
 # Ensure templates directory exists
 os.makedirs("templates", exist_ok=True)
+os.makedirs("schedules/tmp", exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    # Pre-populate with values from .env
+    context = {
+        "request": request,
+        "email": os.getenv("ICLASS_EMAIL", ""),
+        "password": os.getenv("ICLASS_PASSWORD", ""),
+        "student_id": os.getenv("ICLASS_STUDENT_ID", ""),
+        "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
+    }
+
+    # Try to load the default schedule to pre-populate the grid
+    default_schedule_path = os.getenv(
+        "ICLASS_SCHEDULE", "schedules/short_schedule.json"
+    )
+    try:
+        with open(default_schedule_path, "r") as f:
+            context["initial_schedule"] = json.load(f)
+    except Exception:
+        context["initial_schedule"] = []
+
+    return templates.TemplateResponse("index.html", context)
 
 
 @app.websocket("/ws/run")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
-    # Send a starting message
-    await websocket.send_text("Starting iClassPro automation...")
-
-    # We will run the python script as a subprocess so we can capture its stdout/stderr
-    # without having to heavily modify the logging setup in iclasspro.py right away.
-    # We'll use the short schedule for testing the UI.
     try:
+        # First message should be the configuration JSON
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+        promo_code = config.get("promo_code", "")
+        schedule = config.get("schedule", [])
+
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                "Error: Email, password, and student ID are required."
+            )
+            await websocket.close()
+            return
+
+        if not schedule:
+            await websocket.send_text(
+                "Error: Schedule is empty. Please add at least one class."
+            )
+            await websocket.close()
+            return
+
+        # Save the schedule to a temporary file
+        tmp_schedule_path = "schedules/tmp/web_schedule.json"
+        with open(tmp_schedule_path, "w") as f:
+            json.dump(schedule, f)
+
+        # Send a starting message
+        await websocket.send_text("Starting iClassPro automation...")
+
+        # Build the command arguments
+        cmd_args = [
+            "iclasspro.py",
+            "--email",
+            email,
+            "--password",
+            password,
+            "--student-id",
+            str(student_id),
+            "--schedule",
+            tmp_schedule_path,
+        ]
+
+        if promo_code:
+            cmd_args.extend(["--promo-code", promo_code])
+
         process = await asyncio.create_subprocess_exec(
             sys.executable,
-            "iclasspro.py",
-            "--schedule",
-            "schedules/short_schedule.json",
+            *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
         )
