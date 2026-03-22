@@ -132,10 +132,9 @@
                 <label>
                     Load Schedule
                     <div style="display: flex; gap: 0.5rem;">
-                        <select id="schedule-select" style="margin-bottom: 0;">
+                        <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
                             <option value="">Select a schedule...</option>
                         </select>
-                        <button class="secondary" onclick="loadSchedule()" style="width: auto; margin-bottom: 0;">Load</button>
                     </div>
                 </label>
                 <label>
@@ -388,11 +387,9 @@
         }
 
         function clearSchedule() {
-            if (confirm("Are you sure you want to clear the entire schedule?")) {
-                scheduleContainer.innerHTML = '';
-                rowCount = 0;
-                addScheduleRow(); // Add one empty row so it's not totally blank
-            }
+            scheduleContainer.innerHTML = '';
+            rowCount = 0;
+            addScheduleRow(); // Add one empty row so it's not totally blank
         }
 
         function updateStatus(state, text) {
