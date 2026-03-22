@@ -128,7 +128,7 @@ class IClassPro:
         return 0
 
     def _wait_for_cart_item_count(
-        self, min_count: int = 1, timeout: int = 15000
+        self, min_count: int = 1, timeout: int = 60000
     ) -> int:
         """Wait until the cart appears to have at least `min_count` items."""
         logging.info(f"Waiting for cart to contain at least {min_count} item(s)...")
