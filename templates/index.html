@@ -91,6 +91,26 @@
         <!-- Schedule Editor -->
         <details open>
             <summary><strong>Class Schedule</strong></summary>
+
+            <div class="grid" style="margin-bottom: 1rem; align-items: end;">
+                <label>
+                    Load Schedule
+                    <div style="display: flex; gap: 0.5rem;">
+                        <select id="schedule-select" style="margin-bottom: 0;">
+                            <option value="">Select a schedule...</option>
+                        </select>
+                        <button class="secondary" onclick="loadSchedule()" style="width: auto; margin-bottom: 0;">Load</button>
+                    </div>
+                </label>
+                <label>
+                    Save Schedule
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
+                        <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
+                    </div>
+                </label>
+            </div>
+
             <div id="schedule-container">
                 <!-- Schedule rows will be injected here -->
             </div>
@@ -124,6 +144,7 @@
 
         // Initialize the schedule grid
         window.onload = function() {
+            fetchSchedules();
             if (initialSchedule && initialSchedule.length > 0) {
                 initialSchedule.forEach(cls => {
                     addScheduleRow(cls.Location, cls.Day, cls.Time);
@@ -132,6 +153,94 @@
                 addScheduleRow(); // Add one empty row by default
             }
         };
+
+        async function fetchSchedules() {
+            try {
+                const response = await fetch('/api/schedules');
+                const schedules = await response.json();
+                const select = document.getElementById('schedule-select');
+                select.innerHTML = '<option value="">Select a schedule...</option>';
+                schedules.forEach(filename => {
+                    const option = document.createElement('option');
+                    option.value = filename;
+                    option.textContent = filename;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Failed to fetch schedules:", error);
+            }
+        }
+
+        async function loadSchedule() {
+            const select = document.getElementById('schedule-select');
+            const filename = select.value;
+            if (!filename) return;
+
+            try {
+                const response = await fetch(`/api/schedules/${filename}`);
+                if (!response.ok) {
+                    alert("Failed to load schedule");
+                    return;
+                }
+                const schedule = await response.json();
+
+                // Clear existing
+                scheduleContainer.innerHTML = '';
+                rowCount = 0; // reset counter
+
+                if (schedule && schedule.length > 0) {
+                    schedule.forEach(cls => {
+                        addScheduleRow(cls.Location, cls.Day, cls.Time);
+                    });
+                } else {
+                    addScheduleRow();
+                }
+
+                document.getElementById('schedule-name').value = filename;
+            } catch (error) {
+                console.error("Error loading schedule:", error);
+                alert("Error loading schedule");
+            }
+        }
+
+        async function saveSchedule() {
+            let filename = document.getElementById('schedule-name').value.trim();
+            if (!filename) {
+                alert("Please enter a filename to save the schedule.");
+                return;
+            }
+            if (!filename.endsWith('.json')) {
+                filename += '.json';
+            }
+
+            const scheduleData = getScheduleData();
+            const payload = scheduleData.map(item => ({
+                Location: item.Location,
+                Day: item.Day,
+                Time: item.Time
+            }));
+
+            try {
+                const response = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: filename,
+                        schedule: payload
+                    })
+                });
+
+                if (response.ok) {
+                    alert("Schedule saved successfully!");
+                    fetchSchedules(); // refresh dropdown
+                } else {
+                    alert("Failed to save schedule.");
+                }
+            } catch (error) {
+                console.error("Error saving schedule:", error);
+                alert("Error saving schedule");
+            }
+        }
 
         function addScheduleRow(loc = "", day = "Monday", time = "") {
             const rowId = `row-${rowCount++}`;
