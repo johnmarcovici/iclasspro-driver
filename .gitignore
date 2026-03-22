@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 screenshots/
 *.log
+schedules/tmp/

@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iClassPro Enrollment Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        #terminal {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 1rem;
+        }
+        .status-idle { color: #6c757d; }
+        .status-running { color: #ffc107; font-weight: bold;}
+        .status-success { color: #28a745; font-weight: bold;}
+        .status-error { color: #dc3545; font-weight: bold;}
+
+        .schedule-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .schedule-row select, .schedule-row input {
+            margin-bottom: 0;
+            width: 100%;
+        }
+        .schedule-row .day-input {
+            flex: 1;
+        }
+        .delete-btn {
+            width: auto;
+            margin-bottom: 0;
+            background-color: #dc3545;
+            border-color: #dc3545;
+            padding: 0.5rem 1rem;
+        }
+        .delete-btn:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
+        }
+        .status-badge {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+        .status-processing { background-color: #ffc107; }
+        .status-done { background-color: #28a745; }
+        .status-failed { background-color: #dc3545; }
+
+        /* Password eye toggle styling */
+        .password-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            user-select: none;
+            background: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            z-index: 10;
+            color: #6c757d;
+            opacity: 0.6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .password-toggle:hover {
+            opacity: 1;
+        }
+
+        .clear-btn:hover {
+            background-color: #dc3545 !important;
+            color: white !important;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <hgroup>
+            <h1>iClassPro Enrollment Bot</h1>
+            <h2>Automate your class signups</h2>
+        </hgroup>
+
+        <!-- Configuration Settings -->
+        <details open>
+            <summary><strong>Configuration & Credentials</strong></summary>
+            <div class="grid">
+                <label>
+                    Email
+                    <input type="email" id="email" value="{{ email }}" required>
+                </label>
+                <label>
+                    Password
+                    <div class="password-container">
+                        <input type="password" id="password" value="{{ password }}" required>
+                        <button type="button" class="password-toggle" onclick="togglePassword()" title="Toggle password visibility">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    </div>
+                </label>
+            </div>
+            <div class="grid">
+                <label>
+                    Student ID
+                    <input type="number" id="student_id" value="{{ student_id }}" required>
+                </label>
+                <label>
+                    Promo Code (Optional)
+                    <input type="text" id="promo_code" value="{{ promo_code }}">
+                </label>
+            </div>
+        </details>
+
+        <!-- Schedule Editor -->
+        <details open>
+            <summary><strong>Class Schedule</strong></summary>
+
+            <div class="grid" style="margin-bottom: 1rem; align-items: end;">
+                <label>
+                    Load Schedule
+                    <div style="display: flex; gap: 0.5rem;">
+                        <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
+                            <option value="">Select a schedule...</option>
+                        </select>
+                    </div>
+                </label>
+                <label>
+                    Save Schedule
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
+                        <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
+                    </div>
+                </label>
+            </div>
+
+            <div id="schedule-container">
+                <!-- Schedule rows will be injected here -->
+            </div>
+            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
+                <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
+            </div>
+        </details>
+
+        <section style="margin-top: 2rem;">
+            <div class="grid">
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <button id="run-button" onclick="startAutomation()" style="margin-bottom: 0;">▶ Run Enrollment Schedule</button>
+                    <button id="stop-button" class="secondary outline" onclick="stopAutomation()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;" disabled>⏹ Stop</button>
+                </div>
+            </div>
+            <p style="margin-top: 1rem;">Status: <span id="status-indicator" class="status-idle">Idle</span></p>
+        </section>
+
+        <section>
+            <h4>Live Output</h4>
+            <div id="terminal">Waiting to start...</div>
+        </section>
+    </main>
+
+    <script>
+        const initialSchedule = {{ initial_schedule | tojson | safe }};
+        const terminal = document.getElementById("terminal");
+        const statusIndicator = document.getElementById("status-indicator");
+        const runButton = document.getElementById("run-button");
+        const stopButton = document.getElementById("stop-button");
+        const scheduleContainer = document.getElementById("schedule-container");
+
+        let ws = null;
+        let rowCount = 0;
+
+        // Initialize the schedule grid
+        window.onload = function() {
+            fetchSchedules();
+            if (initialSchedule && initialSchedule.length > 0) {
+                initialSchedule.forEach(cls => {
+                    addScheduleRow(cls.Location, cls.Day, cls.Time);
+                });
+            } else {
+                addScheduleRow(); // Add one empty row by default
+            }
+        };
+
+        function togglePassword() {
+            const passwordInput = document.getElementById("password");
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+            } else {
+                passwordInput.type = "password";
+            }
+        }
+
+        async function fetchSchedules() {
+            try {
+                const response = await fetch('/api/schedules');
+                const schedules = await response.json();
+                const select = document.getElementById('schedule-select');
+                select.innerHTML = '<option value="">Select a schedule...</option>';
+                schedules.forEach(filename => {
+                    const option = document.createElement('option');
+                    option.value = filename;
+                    option.textContent = filename;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Failed to fetch schedules:", error);
+            }
+        }
+
+        async function loadSchedule() {
+            const select = document.getElementById('schedule-select');
+            const filename = select.value;
+            if (!filename) return;
+
+            try {
+                const response = await fetch(`/api/schedules/${filename}`);
+                if (!response.ok) {
+                    alert("Failed to load schedule");
+                    return;
+                }
+                const schedule = await response.json();
+
+                // Clear existing
+                scheduleContainer.innerHTML = '';
+                rowCount = 0; // reset counter
+
+                if (schedule && schedule.length > 0) {
+                    schedule.forEach(cls => {
+                        addScheduleRow(cls.Location, cls.Day, cls.Time);
+                    });
+                } else {
+                    addScheduleRow();
+                }
+
+                document.getElementById('schedule-name').value = filename;
+            } catch (error) {
+                console.error("Error loading schedule:", error);
+                alert("Error loading schedule");
+            }
+        }
+
+        async function saveSchedule() {
+            let filename = document.getElementById('schedule-name').value.trim();
+            if (!filename) {
+                alert("Please enter a filename to save the schedule.");
+                return;
+            }
+            if (!filename.endsWith('.json')) {
+                filename += '.json';
+            }
+
+            const scheduleData = getScheduleData();
+            const payload = scheduleData.map(item => ({
+                Location: item.Location,
+                Day: item.Day,
+                Time: item.Time
+            }));
+
+            try {
+                const response = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: filename,
+                        schedule: payload
+                    })
+                });
+
+                if (response.ok) {
+                    alert("Schedule saved successfully!");
+                    fetchSchedules(); // refresh dropdown
+                } else {
+                    alert("Failed to save schedule.");
+                }
+            } catch (error) {
+                console.error("Error saving schedule:", error);
+                alert("Error saving schedule");
+            }
+        }
+
+        function addScheduleRow(loc = "", day = "Monday", time = "") {
+            const rowId = `row-${rowCount++}`;
+            const div = document.createElement("div");
+            div.className = "schedule-row";
+            div.id = rowId;
+
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
+
+            // Location
+            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo"];
+            let isCustomLoc = loc && !predefinedLocs.includes(loc);
+            let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
+            if (isCustomLoc) {
+                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
+            } else if (!loc) {
+                locOptions = `<option value="" disabled selected>Location...</option>` + locOptions;
+            }
+            locOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let locSelectHtml = `<select class="loc-input" style="${isCustomLoc ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${locOptions}</select>`;
+            let locInputHtml = `
+                <div class="custom-input-wrapper" style="display:${isCustomLoc ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
+                    <input type="text" class="loc-input-text" placeholder="Custom Location..." value="${isCustomLoc ? loc : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomLoc ? 'required' : ''}>
+                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
+                </div>
+            `;
+
+            // Time
+            const predefinedTimes = ["5:45am", "7:00am", "9:00am", "10:00am", "10:30am", "12:00pm"];
+            let isCustomTime = time && !predefinedTimes.includes(time);
+            let timeOptions = predefinedTimes.map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join("");
+            if (isCustomTime) {
+                timeOptions = `<option value="${time}" selected>${time}</option>` + timeOptions;
+            } else if (!time) {
+                timeOptions = `<option value="" disabled selected>Time...</option>` + timeOptions;
+            }
+            timeOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let timeSelectHtml = `<select class="time-input" style="${isCustomTime ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${timeOptions}</select>`;
+            let timeInputHtml = `
+                <div class="custom-input-wrapper" style="display:${isCustomTime ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
+                    <input type="text" class="time-input-text" placeholder="Custom Time..." value="${isCustomTime ? time : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomTime ? 'required' : ''}>
+                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
+                </div>
+            `;
+
+            div.innerHTML = `
+                <div class="status-badge" id="status-${rowId}" title="Pending"></div>
+                <select class="day-input">
+                    ${dayOptions}
+                </select>
+                <div style="flex:1;">
+                    ${locSelectHtml}
+                    ${locInputHtml}
+                </div>
+                <div style="flex:1;">
+                    ${timeSelectHtml}
+                    ${timeInputHtml}
+                </div>
+                <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
+            `;
+            scheduleContainer.appendChild(div);
+        }
+
+        function getScheduleData() {
+            const rows = document.querySelectorAll(".schedule-row");
+            const schedule = [];
+            rows.forEach(row => {
+                const locSelect = row.querySelector(".loc-input");
+                const locInput = row.querySelector(".loc-input-text");
+                const loc = locSelect.style.display === 'none' ? locInput.value.trim() : locSelect.value.trim();
+
+                const day = row.querySelector(".day-input").value;
+
+                const timeSelect = row.querySelector(".time-input");
+                const timeInput = row.querySelector(".time-input-text");
+                const time = timeSelect.style.display === 'none' ? timeInput.value.trim() : timeSelect.value.trim();
+
+                if (loc && time && loc !== '__CUSTOM__' && time !== '__CUSTOM__') {
+                    schedule.push({
+                        "Location": loc,
+                        "Day": day,
+                        "Time": time,
+                        "rowId": row.id // keep track of rowId to update status
+                    });
+                }
+            });
+            return schedule;
+        }
+
+        function resetBadges() {
+            document.querySelectorAll(".status-badge").forEach(badge => {
+                badge.className = "status-badge";
+            });
+        }
+
+        function clearSchedule() {
+            scheduleContainer.innerHTML = '';
+            rowCount = 0;
+            addScheduleRow(); // Add one empty row so it's not totally blank
+        }
+
+        function updateStatus(state, text) {
+            statusIndicator.className = `status-${state}`;
+            statusIndicator.innerText = text;
+            if (state === 'running') {
+                runButton.setAttribute('disabled', 'true');
+                stopButton.removeAttribute('disabled');
+            } else {
+                runButton.removeAttribute('disabled');
+                stopButton.setAttribute('disabled', 'true');
+            }
+        }
+
+        let isStopped = false;
+
+        function stopAutomation() {
+            if (ws) {
+                isStopped = true;
+                ws.close();
+                updateStatus("idle", "Stopped by user");
+            }
+        }
+
+        function appendToTerminal(text) {
+            terminal.innerHTML += text + "<br>";
+            terminal.scrollTop = terminal.scrollHeight;
+
+            // Very simple visual feedback parsing based on logs
+            // (A more robust solution would send structured JSON events from the Python script)
+            const scheduleData = getScheduleData(); // re-fetch to get current order
+
+            if (text.includes("--- Processing class")) {
+                // E.g. "--- Processing class 1/2" -> extract index 1
+                const match = text.match(/Processing class (\d+)\//);
+                if (match) {
+                    const idx = parseInt(match[1]) - 1;
+                    if (scheduleData[idx]) {
+                        const badgeId = `status-${scheduleData[idx].rowId}`;
+                        const badge = document.getElementById(badgeId);
+                        if (badge) badge.className = "status-badge status-processing";
+                    }
+                }
+            } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment") || text.includes("Cart item count is now")) {
+                // If we see these, it usually means the class processing finished.
+                // We'll mark the currently "processing" one as done (green).
+                const processingBadge = document.querySelector(".status-processing");
+                if (processingBadge) processingBadge.className = "status-badge status-done";
+            } else if (text.includes("ERROR - Failed to enroll")) {
+                 const processingBadge = document.querySelector(".status-processing");
+                 if (processingBadge) processingBadge.className = "status-badge status-failed";
+            }
+        }
+
+        function startAutomation() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            const student_id = document.getElementById("student_id").value;
+            const promo_code = document.getElementById("promo_code").value;
+            const schedule = getScheduleData();
+
+            if (!email || !password || !student_id) {
+                alert("Please fill in all credentials.");
+                return;
+            }
+
+            if (schedule.length === 0) {
+                alert("Please add at least one valid class to the schedule.");
+                return;
+            }
+
+            terminal.innerHTML = "";
+            resetBadges();
+            updateStatus("running", "Running...");
+            isStopped = false;
+
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/ws/run`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                // Send configuration as the first message
+                ws.send(JSON.stringify({
+                    email: email,
+                    password: password,
+                    student_id: student_id,
+                    promo_code: promo_code,
+                    schedule: schedule
+                }));
+            };
+
+            ws.onmessage = function(event) {
+                appendToTerminal(event.data);
+            };
+
+            ws.onclose = function(event) {
+                if (isStopped) return; // Status already set by stopAutomation
+
+                if (terminal.innerHTML.includes("successfully")) {
+                    const total = document.querySelectorAll(".schedule-row").length;
+                    const done = document.querySelectorAll(".status-done").length;
+                    updateStatus("success", `Completed: Added ${done} of ${total} scheduled classes`);
+                } else if (terminal.innerHTML.includes("failed") || terminal.innerHTML.includes("Error")) {
+                    updateStatus("error", "Failed");
+                } else {
+                    updateStatus("idle", "Disconnected");
+                }
+            };
+
+            ws.onerror = function(error) {
+                appendToTerminal("WebSocket Error: " + error);
+                updateStatus("error", "Connection Error");
+            };
+        }
+    </script>
+</body>
+</html>
