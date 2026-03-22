@@ -3,3 +3,7 @@ python-dotenv
 playwright-stealth
 pre-commit
 black
+fastapi
+uvicorn[standard]
+jinja2
+websockets
