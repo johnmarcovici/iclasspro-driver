@@ -54,6 +54,25 @@
         .status-processing { background-color: #ffc107; }
         .status-done { background-color: #28a745; }
         .status-failed { background-color: #dc3545; }
+
+        /* Password eye toggle styling */
+        .password-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            user-select: none;
+            background: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            font-size: 1.2rem;
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
@@ -73,7 +92,10 @@
                 </label>
                 <label>
                     Password
-                    <input type="password" id="password" value="{{ password }}" required>
+                    <div class="password-container">
+                        <input type="password" id="password" value="{{ password }}" required>
+                        <button type="button" class="password-toggle" onclick="togglePassword()">👁️</button>
+                    </div>
                 </label>
             </div>
             <div class="grid">
@@ -132,6 +154,23 @@
         </section>
     </main>
 
+    <!-- Datalists for custom combos -->
+    <datalist id="location-list">
+        <option value="El Segundo">
+        <option value="Santa Monica">
+        <option value="Culver">
+        <option value="Echo">
+    </datalist>
+
+    <datalist id="time-list">
+        <option value="5:45am">
+        <option value="7:00am">
+        <option value="9:00am">
+        <option value="10:00am">
+        <option value="10:30am">
+        <option value="12:00pm">
+    </datalist>
+
     <script>
         const initialSchedule = {{ initial_schedule | tojson | safe }};
         const terminal = document.getElementById("terminal");
@@ -153,6 +192,15 @@
                 addScheduleRow(); // Add one empty row by default
             }
         };
+
+        function togglePassword() {
+            const passwordInput = document.getElementById("password");
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+            } else {
+                passwordInput.type = "password";
+            }
+        }
 
         async function fetchSchedules() {
             try {
@@ -251,23 +299,13 @@
             const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
-            const locations = ["El Segundo", "Santa Monica", "Culver", "Echo"];
-            let locOptions = locations.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
-            if (loc && !locations.includes(loc)) {
-                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
-            } else if (!loc) {
-                locOptions = `<option value="" disabled ${!loc ? 'selected' : ''}>Location...</option>` + locOptions;
-            }
-
             div.innerHTML = `
                 <div class="status-badge" id="status-${rowId}" title="Pending"></div>
-                <select class="loc-input" required>
-                    ${locOptions}
-                </select>
+                <input type="text" class="loc-input" list="location-list" placeholder="Location..." value="${loc}" required>
                 <select class="day-input">
                     ${dayOptions}
                 </select>
-                <input type="text" class="time-input" placeholder="Time (e.g. 5:45am)" value="${time}" required>
+                <input type="text" class="time-input" list="time-list" placeholder="Time..." value="${time}" required>
                 <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
             `;
             scheduleContainer.appendChild(div);
@@ -327,7 +365,7 @@
                         if (badge) badge.className = "status-badge status-processing";
                     }
                 }
-            } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment")) {
+            } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment") || text.includes("Cart item count is now")) {
                 // If we see these, it usually means the class processing finished.
                 // We'll mark the currently "processing" one as done (green).
                 const processingBadge = document.querySelector(".status-processing");
