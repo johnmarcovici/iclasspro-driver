@@ -154,23 +154,6 @@
         </section>
     </main>
 
-    <!-- Datalists for custom combos -->
-    <datalist id="location-list">
-        <option value="El Segundo">
-        <option value="Santa Monica">
-        <option value="Culver">
-        <option value="Echo">
-    </datalist>
-
-    <datalist id="time-list">
-        <option value="5:45am">
-        <option value="7:00am">
-        <option value="9:00am">
-        <option value="10:00am">
-        <option value="10:30am">
-        <option value="12:00pm">
-    </datalist>
-
     <script>
         const initialSchedule = {{ initial_schedule | tojson | safe }};
         const terminal = document.getElementById("terminal");
@@ -299,13 +282,39 @@
             const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
+            // Location
+            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo"];
+            let isCustomLoc = loc && !predefinedLocs.includes(loc);
+            let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
+            if (isCustomLoc) {
+                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
+            } else if (!loc) {
+                locOptions = `<option value="" disabled selected>Location...</option>` + locOptions;
+            }
+            locOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let locHtml = `<select class="loc-input" required onchange="if(this.value === '__CUSTOM__') { const inp = document.createElement('input'); inp.type='text'; inp.className='loc-input'; inp.placeholder='Location...'; inp.required=true; this.replaceWith(inp); inp.focus(); }">${locOptions}</select>`;
+
+            // Time
+            const predefinedTimes = ["5:45am", "7:00am", "9:00am", "10:00am", "10:30am", "12:00pm"];
+            let isCustomTime = time && !predefinedTimes.includes(time);
+            let timeOptions = predefinedTimes.map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join("");
+            if (isCustomTime) {
+                timeOptions = `<option value="${time}" selected>${time}</option>` + timeOptions;
+            } else if (!time) {
+                timeOptions = `<option value="" disabled selected>Time...</option>` + timeOptions;
+            }
+            timeOptions += `<option value="__CUSTOM__">Custom...</option>`;
+
+            let timeHtml = `<select class="time-input" required onchange="if(this.value === '__CUSTOM__') { const inp = document.createElement('input'); inp.type='text'; inp.className='time-input'; inp.placeholder='Time...'; inp.required=true; this.replaceWith(inp); inp.focus(); }">${timeOptions}</select>`;
+
             div.innerHTML = `
                 <div class="status-badge" id="status-${rowId}" title="Pending"></div>
-                <input type="text" class="loc-input" list="location-list" placeholder="Location..." value="${loc}" required>
+                ${locHtml}
                 <select class="day-input">
                     ${dayOptions}
                 </select>
-                <input type="text" class="time-input" list="time-list" placeholder="Time..." value="${time}" required>
+                ${timeHtml}
                 <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
             `;
             scheduleContainer.appendChild(div);
