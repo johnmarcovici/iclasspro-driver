@@ -4,8 +4,8 @@ import os
 import sys
 from typing import List, Dict
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from dotenv import load_dotenv, set_key, find_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,6 +16,10 @@ from starlette.requests import Request
 class ScheduleSaveRequest(BaseModel):
     filename: str
     schedule: List[Dict[str, str]]
+
+
+class UpdateEnvRequest(BaseModel):
+    filename: str
 
 
 # Load environment variables
@@ -32,34 +36,65 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
-    # Pre-populate with values from .env
     context = {
         "request": request,
         "email": os.getenv("ICLASS_EMAIL", ""),
         "password": os.getenv("ICLASS_PASSWORD", ""),
         "student_id": os.getenv("ICLASS_STUDENT_ID", ""),
         "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
+        "initial_schedule": [],
+        "default_schedule_filename": None,
     }
 
-    # Try to load the default schedule to pre-populate the grid
-    default_schedule_path = os.getenv(
-        "ICLASS_SCHEDULE", "schedules/short_schedule.json"
-    )
-    try:
-        with open(default_schedule_path, "r") as f:
-            context["initial_schedule"] = json.load(f)
-    except Exception:
-        context["initial_schedule"] = []
+    # Try to load the default schedule from .env to pre-populate the grid
+    default_schedule_env = os.getenv("ICLASS_SCHEDULE")
+    if default_schedule_env:
+        default_schedule_path = os.path.normpath(default_schedule_env)
+        if os.path.exists(default_schedule_path):
+            try:
+                with open(default_schedule_path, "r") as f:
+                    context["initial_schedule"] = json.load(f)
+                context["default_schedule_filename"] = os.path.basename(
+                    default_schedule_path
+                )
+            except Exception:
+                context["initial_schedule"] = []
+                context["default_schedule_filename"] = None
+
+    schedules_list = []
+    schedules_dir = "schedules"
+    if os.path.exists(schedules_dir):
+        for f in os.listdir(schedules_dir):
+            if f.endswith(".json") and os.path.isfile(os.path.join(schedules_dir, f)):
+                schedules_list.append(f)
+    context["schedules_list"] = schedules_list
 
     return templates.TemplateResponse("index.html", context)
+
+
+@app.post("/api/update-default-schedule")
+async def update_default_schedule(request: UpdateEnvRequest):
+    dotenv_path = find_dotenv()
+    if not dotenv_path:
+        with open(".env", "w") as f:
+            pass
+        dotenv_path = find_dotenv()
+
+    schedule_path = os.path.join("schedules", request.filename)
+    if not os.path.exists(schedule_path):
+        raise HTTPException(status_code=404, detail="Schedule file not found")
+
+    set_key(dotenv_path, "ICLASS_SCHEDULE", schedule_path)
+    return {"message": f"Default schedule updated to {request.filename}"}
 
 
 @app.get("/api/schedules")
 async def list_schedules():
     schedules = []
-    if os.path.exists("schedules"):
-        for f in os.listdir("schedules"):
-            if f.endswith(".json") and os.path.isfile(os.path.join("schedules", f)):
+    schedules_dir = "schedules"
+    if os.path.exists(schedules_dir):
+        for f in os.listdir(schedules_dir):
+            if f.endswith(".json") and os.path.isfile(os.path.join(schedules_dir, f)):
                 schedules.append(f)
     return schedules
 

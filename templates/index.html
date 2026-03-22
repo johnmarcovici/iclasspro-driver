@@ -136,6 +136,9 @@
                     <div style="display: flex; gap: 0.5rem;">
                         <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
                             <option value="">Select a schedule...</option>
+                            {% for schedule_file in schedules_list %}
+                            <option value="{{ schedule_file }}" {% if schedule_file == default_schedule_filename %}selected{% endif %}>{{ schedule_file }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                 </label>
@@ -183,10 +186,10 @@
 
         let ws = null;
         let rowCount = 0;
+        let currentScheduleFilename = "{{ default_schedule_filename or '' }}";
 
         // Initialize the schedule grid
         window.onload = function() {
-            fetchSchedules();
             if (initialSchedule && initialSchedule.length > 0) {
                 initialSchedule.forEach(cls => {
                     addScheduleRow(cls.Location, cls.Day, cls.Time);
@@ -205,27 +208,14 @@
             }
         }
 
-        async function fetchSchedules() {
-            try {
-                const response = await fetch('/api/schedules');
-                const schedules = await response.json();
-                const select = document.getElementById('schedule-select');
-                select.innerHTML = '<option value="">Select a schedule...</option>';
-                schedules.forEach(filename => {
-                    const option = document.createElement('option');
-                    option.value = filename;
-                    option.textContent = filename;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error("Failed to fetch schedules:", error);
-            }
-        }
-
         async function loadSchedule() {
             const select = document.getElementById('schedule-select');
             const filename = select.value;
-            if (!filename) return;
+            currentScheduleFilename = filename; // Update global tracker
+
+            if (!filename) {
+                return;
+            }
 
             try {
                 const response = await fetch(`/api/schedules/${filename}`);
@@ -282,8 +272,7 @@
                 });
 
                 if (response.ok) {
-                    alert("Schedule saved successfully!");
-                    fetchSchedules(); // refresh dropdown
+                    alert("Schedule saved successfully! Please reload the page to see it in the dropdown.");
                 } else {
                     alert("Failed to save schedule.");
                 }
@@ -449,12 +438,25 @@
             }
         }
 
-        function startAutomation() {
+        async function startAutomation() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
             const schedule = getScheduleData();
+
+            // Silently update the .env file with the last run schedule
+            if (currentScheduleFilename) {
+                try {
+                    await fetch('/api/update-default-schedule', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filename: currentScheduleFilename })
+                    });
+                } catch (error) {
+                    console.error("Could not update default schedule in .env:", error);
+                }
+            }
 
             if (!email || !password || !student_id) {
                 alert("Please fill in all credentials.");
