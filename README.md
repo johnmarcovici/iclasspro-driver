@@ -6,10 +6,10 @@ This bot automates class enrollments on an iClassPro-powered portal. You can run
 
 The easiest way to use the bot is through the web dashboard. It provides a full user interface for building schedules, managing credentials, and viewing live progress.
 
-### To Launch the Dashboard:
+### Quick Start:
 
-1.  Follow the one-time setup steps below.
-2.  Run the dashboard script:
+1.  Clone this repository.
+2.  Run the dashboard script (this will handle first-time setup for you):
     ```bash
     ./run_dashboard.sh
     ```
@@ -17,46 +17,45 @@ The easiest way to use the bot is through the web dashboard. It provides a full 
 
 From there, you can configure everything visually!
 
+---
+
 ## 🤖 Command-Line Usage
 
 For advanced users or for integrating with other scripts.
 
-### One-Time Setup
+### Basic Run
 
-1.  **Create a Virtual Environment & Install Dependencies:**
-    ```bash
-    python -m venv venv && source ./venv/bin/activate && pip install -r requirements.txt
-    ```
-2.  **Install the Browser:**
-    ```bash
-    playwright install chromium
-    ```
-3.  **Configure Credentials:**
-    ```bash
-    cp .env.example .env
-    # Edit .env with your real email, password, and student ID
-    ```
-
-### Running the Bot
-
-The most reliable way to run the bot from the command line is using the helper script:
+The helper script handles environment setup automatically:
 
 ```bash
 ./run_enrollment.sh
 ```
 
-This script automatically uses the schedule and credentials defined in your `.env` file. You can also pass command-line arguments to override any setting:
+This script uses the schedule and credentials defined in your `.env` file (which is automatically created if it doesn't exist). You can also pass command-line arguments to override any setting:
 
 ```bash
-# Run with a specific schedule and complete the final transaction
+# Example: Run with a specific schedule and complete the final transaction
 ./run_enrollment.sh --schedule schedules/my_custom_schedule.json --complete-transaction
 ```
+
+### Manual Environment Setup (Optional)
+
+If you prefer to manage the environment yourself:
+
+1.  **Create a Virtual Environment & Install Dependencies:**
+    ```bash
+    python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+    ```
+2.  **Install the Browser:**
+    ```bash
+    playwright install chromium
+    ```
 
 ## ⚙️ Configuration
 
 ### Schedules (`schedules/` directory)
 
-The bot uses simple JSON files to define which classes to enroll in. You can create as many as you like. The format is a list of classes:
+The bot uses JSON files to define which classes to enroll in. You can create as many as you like. The format is a list of classes:
 
 ```json
 [
@@ -71,7 +70,7 @@ Use the `.env` file to store sensitive values. This file is ignored by Git, so y
 
 ## 🤖 Automation
 
-For automated runs, you can call the `run_enrollment.sh` script from a cron job. This is the simplest way to ensure the environment is set up correctly.
+For automated runs, you can call the `run_enrollment.sh` script from a cron job.
 
 ```bash
 # Example: Run every Sunday at 8:00 PM
