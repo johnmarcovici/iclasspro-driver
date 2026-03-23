@@ -278,7 +278,11 @@ class IClassPro:
         add_to_cart_button.click()
 
         # Wait for the cart item count to increase
-        self._wait_for_cart_item_count(min_count=initial_cart_count + 1)
+        final_cart_count = self._wait_for_cart_item_count(
+            min_count=initial_cart_count + 1
+        )
+        if final_cart_count < initial_cart_count + 1:
+            raise RuntimeError("Failed to verify that the class was added to the cart.")
 
         self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
 
