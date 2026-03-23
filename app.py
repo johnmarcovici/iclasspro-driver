@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from dotenv import load_dotenv, set_key, find_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
@@ -31,9 +30,6 @@ class UpdateEnvRequest(BaseModel):
 load_dotenv(override=True)
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
-
-# Mount static files for templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Ensure templates and schedules directories exist
 os.makedirs("templates", exist_ok=True)
