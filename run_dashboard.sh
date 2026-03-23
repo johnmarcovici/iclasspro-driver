@@ -8,6 +8,11 @@ cd "$(dirname "$0")"
 # Activate virtual environment
 source venv/bin/activate
 
+# Kill any existing process on port 8000
+echo "Stopping any existing server instances..."
+fuser -k 8000/tcp 2>/dev/null || true
+sleep 1 # Give it a moment to fully shut down
+
 # Start the FastAPI web server using uvicorn
 echo "Starting iClassPro Enrollment Dashboard..."
 echo "Access the dashboard at: http://localhost:8000"
