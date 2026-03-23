@@ -28,17 +28,48 @@ def send_log_email(
     smtp_server,
     smtp_port,
     subject_status,
+    summary_data=None,
 ):
-    """Reads the log file and sends its content in an email."""
+    """Reads the log file, prepends a summary, and sends its content in an email."""
     try:
         with open(log_file_path, "r") as f:
             log_content = f.read()
 
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("alternative")
         msg["Subject"] = f"iClassPro Enrollment Log ({subject_status})"
         msg["From"] = from_addr
         msg["To"] = to_addr
-        msg.attach(MIMEText(log_content, "plain"))
+
+        text_content = f"Enrollment Status: {subject_status}\n\n"
+        html_content = f"<h2>Enrollment Status: {subject_status}</h2>"
+
+        if summary_data:
+            text_content += "Summary:\n"
+            html_content += (
+                "<h3>Summary:</h3>"
+                "<table border='1' cellpadding='5' style='border-collapse: collapse;'>"
+                "<tr><th>Day</th><th>Time</th><th>Location</th><th>Status</th><th>Error</th></tr>"
+            )
+            for item in summary_data:
+                cls = item.get("class", {})
+                status = item.get("status", "Unknown")
+                error = item.get("error", "")
+                day = cls.get("Day", "")
+                time_str = cls.get("Time", "")
+                location = cls.get("Location", "")
+                text_content += f"- {day} {time_str} at {location}: {status} {error}\n"
+                html_content += f"<tr><td>{day}</td><td>{time_str}</td><td>{location}</td><td>{status}</td><td>{error}</td></tr>"
+
+            text_content += "\n\nFull Log:\n"
+            html_content += "</table><h3>Full Log:</h3>"
+
+        text_content += log_content
+        html_content += (
+            f"<pre style='background: #f4f4f4; padding: 10px;'>{log_content}</pre>"
+        )
+
+        msg.attach(MIMEText(text_content, "plain"))
+        msg.attach(MIMEText(html_content, "html"))
 
         logging.info("Connecting to SMTP server to send log email...")
         with smtplib.SMTP(smtp_server, smtp_port) as server:
@@ -390,6 +421,7 @@ def main():
 
     driver = IClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
     main_exception = None
+    summary_data = []
 
     try:
         with open(args.schedule, "r") as f:
@@ -410,9 +442,15 @@ def main():
                     student_id=args.student_id,
                     class_index=i,
                 )
+                summary_data.append(
+                    {"class": class_info, "status": "Success", "error": ""}
+                )
             except Exception as e:
                 logging.error(
                     f"Failed to enroll in class {class_info}: {e}", exc_info=True
+                )
+                summary_data.append(
+                    {"class": class_info, "status": "Failed", "error": str(e)}
                 )
                 driver.take_screenshot(f"error_class_{i}.png")
 
@@ -446,6 +484,7 @@ def main():
                     smtp_server,
                     smtp_port,
                     status,
+                    summary_data=summary_data,
                 )
             else:
                 logging.warning(
