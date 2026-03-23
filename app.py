@@ -71,7 +71,7 @@ async def get(request: Request):
                 schedules_list.append(f)
     context["schedules_list"] = schedules_list
 
-    return templates.TemplateResponse("index.html", context)
+    return templates.TemplateResponse(request, "index.html", context)
 
 
 @app.post("/api/update-default-schedule")
