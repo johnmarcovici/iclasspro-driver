@@ -38,18 +38,7 @@ This script uses the schedule and credentials defined in your `.env` file (which
 ./run_enrollment.sh --schedule schedules/my_custom_schedule.json --complete-transaction
 ```
 
-### Manual Environment Setup (Optional)
-
-If you prefer to manage the environment yourself:
-
-1.  **Create a Virtual Environment & Install Dependencies:**
-    ```bash
-    python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
-    ```
-2.  **Install the Browser:**
-    ```bash
-    playwright install chromium
-    ```
+*Note: The one-time environment setup (creating the virtual environment, installing dependencies, and installing the browser) is handled automatically the first time you run `run_dashboard.sh` or `run_enrollment.sh`.*
 
 ## ⚙️ Configuration
 
