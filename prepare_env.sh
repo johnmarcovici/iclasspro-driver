@@ -19,11 +19,11 @@ source venv/bin/activate
 
 # Install/Update requirements
 echo "Checking dependencies..."
-pip install -r requirements.txt &> /dev/null
+python3 -m pip install -r requirements.txt &> /dev/null
 
 # Ensure playwright browser is installed
 echo "Ensuring Playwright browser is ready..."
-playwright install chromium &> /dev/null
+python3 -m playwright install chromium &> /dev/null
 
 # Create .env if it doesn't exist
 if [ ! -f .env ]; then

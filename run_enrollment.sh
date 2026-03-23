@@ -10,6 +10,6 @@ source prepare_env.sh
 
 # Run the enrollment with any additional arguments passed to this script
 echo "Starting iClassPro enrollment at $(date)"
-python iclasspro.py "$@"
+python3 iclasspro.py "$@"
 
 echo "Enrollment completed at $(date)"
