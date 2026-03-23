@@ -12,6 +12,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.requests import Request
 
+from scraper import scrape_available_classes
+
 
 class ScheduleSaveRequest(BaseModel):
     filename: str
@@ -127,9 +129,7 @@ async def save_schedule(request: ScheduleSaveRequest):
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     process = None
-
     try:
-        # First message should be the configuration JSON
         config_data = await websocket.receive_text()
         config = json.loads(config_data)
 
@@ -138,31 +138,26 @@ async def websocket_endpoint(websocket: WebSocket):
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
         schedule = config.get("schedule", [])
+        from_scraper = config.get("from_scraper", False)
 
         if not all([email, password, student_id]):
             await websocket.send_text(
                 "Error: Email, password, and student ID are required."
             )
-            await websocket.close()
             return
 
         if not schedule:
-            await websocket.send_text(
-                "Error: Schedule is empty. Please add at least one class."
-            )
-            await websocket.close()
+            await websocket.send_text("Error: Schedule is empty.")
             return
 
-        # Save the schedule to a temporary file
         tmp_schedule_path = "schedules/tmp/web_schedule.json"
         with open(tmp_schedule_path, "w") as f:
             json.dump(schedule, f)
 
-        # Send a starting message
         await websocket.send_text("Starting iClassPro automation...")
 
-        # Build the command arguments
         cmd_args = [
+            sys.executable,
             "iclasspro.py",
             "--email",
             email,
@@ -170,59 +165,70 @@ async def websocket_endpoint(websocket: WebSocket):
             password,
             "--student-id",
             str(student_id),
-            "--schedule",
-            tmp_schedule_path,
         ]
-
         if promo_code:
             cmd_args.extend(["--promo-code", promo_code])
 
+        if from_scraper:
+            cmd_args.extend(["--scraped-data", tmp_schedule_path])
+        else:
+            cmd_args.extend(["--schedule", tmp_schedule_path])
+
         process = await asyncio.create_subprocess_exec(
-            sys.executable,
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            stderr=asyncio.subprocess.STDOUT,
         )
 
         while True:
             line = await process.stdout.readline()
             if not line:
                 break
-
-            # Decode the line and send it to the websocket
-            text_line = line.decode("utf-8").rstrip()
-            await websocket.send_text(text_line)
+            await websocket.send_text(line.decode("utf-8").rstrip())
 
         await process.wait()
-
         if process.returncode == 0:
             await websocket.send_text("Automation completed successfully.")
         else:
-            # Only send failed message if we didn't deliberately kill it
-            if process.returncode != -15 and process.returncode != -9:
+            if process.returncode not in [-15, -9]:
                 await websocket.send_text(
                     f"Automation failed with exit code {process.returncode}."
                 )
 
     except WebSocketDisconnect:
-        # Expected behavior when user closes the tab or clicks Stop
         pass
     except Exception as e:
-        try:
-            await websocket.send_text(f"Error: {str(e)}")
-        except Exception:
-            pass  # Socket might already be closed
+        await websocket.send_text(f"Error: {str(e)}")
     finally:
-        # CRITICAL: Kill the subprocess if it's still running when the connection drops
         if process and process.returncode is None:
-            try:
-                process.terminate()
-            except OSError:
-                pass
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+            process.terminate()
+        await websocket.close()
+
+
+@app.websocket("/ws/scrape")
+async def websocket_scrape_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                json.dumps({"error": "Email, password, and student ID are required."})
+            )
+            return
+        await websocket.send_text(json.dumps({"log": "Starting scraper..."}))
+        async for class_info in scrape_available_classes(email, password, student_id):
+            await websocket.send_text(json.dumps(class_info))
+        await websocket.send_text(json.dumps({"log": "Scraping complete."}))
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        await websocket.send_text(json.dumps({"error": f"An error occurred: {str(e)}"}))
+    finally:
+        await websocket.close()
 
 
 if __name__ == "__main__":

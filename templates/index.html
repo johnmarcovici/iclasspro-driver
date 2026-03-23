@@ -6,7 +6,7 @@
     <title>iClassPro Enrollment Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <style>
-        #terminal {
+        #terminal, #scraper-output {
             background-color: #1e1e1e;
             color: #d4d4d4;
             padding: 1rem;
@@ -22,18 +22,16 @@
         .status-success { color: #28a745; font-weight: bold;}
         .status-error { color: #dc3545; font-weight: bold;}
 
-        .schedule-row {
-            display: flex;
+        .schedule-row, .scraped-class-row {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr 1fr auto;
             gap: 1rem;
             align-items: center;
             margin-bottom: 0.5rem;
         }
-        .schedule-row select, .schedule-row input {
+        .schedule-row select, .schedule-row input, .scraped-class-row span {
             margin-bottom: 0;
             width: 100%;
-        }
-        .schedule-row .day-input {
-            flex: 1;
         }
         .delete-btn {
             width: auto;
@@ -57,7 +55,6 @@
         .status-done { background-color: #28a745; }
         .status-failed { background-color: #dc3545; }
 
-        /* Password eye toggle styling */
         .password-container {
             position: relative;
             display: flex;
@@ -73,20 +70,33 @@
             padding: 0;
             margin: 0;
             z-index: 10;
-            color: #6c757d;
-            opacity: 0.6;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .password-toggle:hover {
-            opacity: 1;
         }
 
         .clear-btn:hover {
             background-color: #dc3545 !important;
             color: white !important;
         }
+
+        /* Tab styling */
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        nav {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        nav a {
+            cursor: pointer;
+        }
+        nav a.active {
+            font-weight: bold;
+            text-decoration: underline;
+        }
+
     </style>
 </head>
 <body>
@@ -126,58 +136,69 @@
             </div>
         </details>
 
-        <!-- Schedule Editor -->
-        <details open>
-            <summary><strong>Class Schedule</strong></summary>
+        <!-- Tabs -->
+        <nav>
+            <a onclick="showTab('manual-schedule')" id="tab-manual-schedule" class="active">Run Manual Schedule</a>
+            <a onclick="showTab('discover-enroll')" id="tab-discover-enroll">Discover & Enroll</a>
+        </nav>
 
-            <div class="grid" style="margin-bottom: 1rem; align-items: end;">
-                <label>
-                    Load Schedule
-                    <div style="display: flex; gap: 0.5rem;">
-                        <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
-                            <option value="">Select a schedule...</option>
-                            {% for schedule_file in schedules_list %}
-                            <option value="{{ schedule_file }}" {% if schedule_file == default_schedule_filename %}selected{% endif %}>{{ schedule_file }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </label>
-                <label>
-                    Save Schedule
-                    <div style="display: flex; gap: 0.5rem;">
-                        <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
-                        <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
-                    </div>
-                </label>
-            </div>
-
-            <div id="schedule-container">
-                <!-- Schedule rows will be injected here -->
-            </div>
-            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
-                <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
-            </div>
-        </details>
-
-        <section style="margin-top: 2rem;">
-            <div class="grid">
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <button id="run-button" onclick="startAutomation()" style="margin-bottom: 0;">▶ Run Enrollment Schedule</button>
-                    <button id="stop-button" class="secondary outline" onclick="stopAutomation()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;" disabled>⏹ Stop</button>
+        <!-- Manual Schedule Tab -->
+        <div id="manual-schedule" class="tab-content active">
+            <details open>
+                <summary><strong>Class Schedule</strong></summary>
+                <div class="grid" style="margin-bottom: 1rem; align-items: end;">
+                    <label>
+                        Load Schedule
+                        <div style="display: flex; gap: 0.5rem;">
+                            <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
+                                <option value="">Select a schedule...</option>
+                                {% for schedule_file in schedules_list %}
+                                <option value="{{ schedule_file }}" {% if schedule_file == default_schedule_filename %}selected{% endif %}>{{ schedule_file }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </label>
+                    <label>
+                        Save Schedule
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
+                            <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
+                        </div>
+                    </label>
                 </div>
-            </div>
-            <p style="margin-top: 1rem;">Status: <span id="status-indicator" class="status-idle">Idle</span></p>
-        </section>
-
-        <section>
+                <div id="schedule-container"></div>
+                <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                    <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
+                    <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0;">Clear All</button>
+                </div>
+            </details>
+            <section style="margin-top: 2rem;">
+                <button id="run-button" onclick="startAutomation()">▶ Run Enrollment Schedule</button>
+                <button id="stop-button" class="secondary outline" onclick="stopAutomation()" disabled>⏹ Stop</button>
+                <p style="margin-top: 1rem;">Status: <span id="status-indicator" class="status-idle">Idle</span></p>
+            </section>
             <h4>Live Output</h4>
             <div id="terminal">Waiting to start...</div>
-        </section>
+        </div>
+
+        <!-- Discover & Enroll Tab -->
+        <div id="discover-enroll" class="tab-content">
+            <section>
+                <button id="scrape-button" onclick="startScraper()">Scan for Available Classes</button>
+                <h4>Available Classes</h4>
+                <div id="scraper-output">Click scan to begin...</div>
+                <div id="scraped-classes-container" style="margin-top: 1rem;"></div>
+                <button id="run-scraped-button" onclick="startAutomation(true)" style="margin-top: 1rem;" disabled>Enroll in Selected Classes</button>
+            </section>
+        </div>
     </main>
 
     <script>
-        const initialSchedule = {{ initial_schedule | tojson | safe }};
+        // --- Common Elements & Variables ---
+        const emailEl = document.getElementById("email");
+        const passwordEl = document.getElementById("password");
+        const studentIdEl = document.getElementById("student_id");
+        const promoCodeEl = document.getElementById("promo_code");
         const terminal = document.getElementById("terminal");
         const statusIndicator = document.getElementById("status-indicator");
         const runButton = document.getElementById("run-button");
@@ -187,33 +208,42 @@
         let ws = null;
         let rowCount = 0;
         let currentScheduleFilename = "{{ default_schedule_filename or '' }}";
+        let isStopped = false;
 
-        // Initialize the schedule grid
+        // --- Tab Management ---
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('nav a').forEach(link => link.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        // --- Initialization ---
+        const initialSchedule = {{ initial_schedule | tojson | safe }};
         window.onload = function() {
             if (initialSchedule && initialSchedule.length > 0) {
-                initialSchedule.forEach(cls => {
-                    addScheduleRow(cls.Location, cls.Day, cls.Time);
-                });
+                initialSchedule.forEach(cls => addScheduleRow(cls.Location, cls.Day, cls.Time));
             } else {
-                addScheduleRow(); // Add one empty row by default
+                addScheduleRow();
             }
         };
 
         function togglePassword() {
-            const passwordInput = document.getElementById("password");
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
+            if (passwordEl.type === "password") {
+                passwordEl.type = "text";
             } else {
-                passwordInput.type = "password";
+                passwordEl.type = "password";
             }
         }
 
+        // --- Manual Schedule Logic ---
         async function loadSchedule() {
             const select = document.getElementById('schedule-select');
             const filename = select.value;
-            currentScheduleFilename = filename; // Update global tracker
+            currentScheduleFilename = filename;
 
             if (!filename) {
+                clearSchedule();
                 return;
             }
 
@@ -224,19 +254,13 @@
                     return;
                 }
                 const schedule = await response.json();
-
-                // Clear existing
                 scheduleContainer.innerHTML = '';
-                rowCount = 0; // reset counter
-
+                rowCount = 0;
                 if (schedule && schedule.length > 0) {
-                    schedule.forEach(cls => {
-                        addScheduleRow(cls.Location, cls.Day, cls.Time);
-                    });
+                    schedule.forEach(cls => addScheduleRow(cls.Location, cls.Day, cls.Time));
                 } else {
                     addScheduleRow();
                 }
-
                 document.getElementById('schedule-name').value = filename;
             } catch (error) {
                 console.error("Error loading schedule:", error);
@@ -253,24 +277,18 @@
             if (!filename.endsWith('.json')) {
                 filename += '.json';
             }
-
             const scheduleData = getScheduleData();
             const payload = scheduleData.map(item => ({
                 Location: item.Location,
                 Day: item.Day,
                 Time: item.Time
             }));
-
             try {
                 const response = await fetch('/api/schedules', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        filename: filename,
-                        schedule: payload
-                    })
+                    body: JSON.stringify({ filename: filename, schedule: payload })
                 });
-
                 if (response.ok) {
                     alert("Schedule saved successfully! Please reload the page to see it in the dropdown.");
                 } else {
@@ -287,63 +305,25 @@
             const div = document.createElement("div");
             div.className = "schedule-row";
             div.id = rowId;
-
             const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
-
-            // Location
             const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo"];
             let isCustomLoc = loc && !predefinedLocs.includes(loc);
             let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
-            if (isCustomLoc) {
-                locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
-            } else if (!loc) {
-                locOptions = `<option value="" disabled selected>Location...</option>` + locOptions;
-            }
+            if(isCustomLoc) locOptions = `<option value="${loc}" selected>${loc}</option>` + locOptions;
+            else if(!loc) locOptions = `<option value="" disabled selected>Location...</option>` + locOptions;
             locOptions += `<option value="__CUSTOM__">Custom...</option>`;
-
             let locSelectHtml = `<select class="loc-input" style="${isCustomLoc ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${locOptions}</select>`;
-            let locInputHtml = `
-                <div class="custom-input-wrapper" style="display:${isCustomLoc ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
-                    <input type="text" class="loc-input-text" placeholder="Custom Location..." value="${isCustomLoc ? loc : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomLoc ? 'required' : ''}>
-                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
-                </div>
-            `;
-
-            // Time
+            let locInputHtml = `<div class="custom-input-wrapper" style="display:${isCustomLoc ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;"><input type="text" class="loc-input-text" placeholder="Custom Location..." value="${isCustomLoc ? loc : ''}" style="margin-bottom:0; width:100%;" ${isCustomLoc ? 'required' : ''}><button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block';">▼</button></div>`;
             const predefinedTimes = ["5:45am", "7:00am", "9:00am", "10:00am", "10:30am", "12:00pm"];
             let isCustomTime = time && !predefinedTimes.includes(time);
             let timeOptions = predefinedTimes.map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join("");
-            if (isCustomTime) {
-                timeOptions = `<option value="${time}" selected>${time}</option>` + timeOptions;
-            } else if (!time) {
-                timeOptions = `<option value="" disabled selected>Time...</option>` + timeOptions;
-            }
+            if(isCustomTime) timeOptions = `<option value="${time}" selected>${time}</option>` + timeOptions;
+            else if(!time) timeOptions = `<option value="" disabled selected>Time...</option>` + timeOptions;
             timeOptions += `<option value="__CUSTOM__">Custom...</option>`;
-
             let timeSelectHtml = `<select class="time-input" style="${isCustomTime ? 'display:none;' : ''}" required onchange="if(this.value === '__CUSTOM__') { this.style.display='none'; this.nextElementSibling.style.display='flex'; this.nextElementSibling.querySelector('input').focus(); this.value=''; }">${timeOptions}</select>`;
-            let timeInputHtml = `
-                <div class="custom-input-wrapper" style="display:${isCustomTime ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;">
-                    <input type="text" class="time-input-text" placeholder="Custom Time..." value="${isCustomTime ? time : ''}" style="margin-bottom:0; width:100%; padding-right:2rem;" ${isCustomTime ? 'required' : ''}>
-                    <button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block'; this.parentElement.previousElementSibling.value=''; this.previousElementSibling.value='';" style="position:absolute; right:0; background:none; border:none; padding:0 0.5rem; color:#888; cursor:pointer;">▼</button>
-                </div>
-            `;
-
-            div.innerHTML = `
-                <div class="status-badge" id="status-${rowId}" title="Pending"></div>
-                <select class="day-input">
-                    ${dayOptions}
-                </select>
-                <div style="flex:1;">
-                    ${locSelectHtml}
-                    ${locInputHtml}
-                </div>
-                <div style="flex:1;">
-                    ${timeSelectHtml}
-                    ${timeInputHtml}
-                </div>
-                <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
-            `;
+            let timeInputHtml = `<div class="custom-input-wrapper" style="display:${isCustomTime ? 'flex' : 'none'}; position:relative; width:100%; align-items:center;"><input type="text" class="time-input-text" placeholder="Custom Time..." value="${isCustomTime ? time : ''}" style="margin-bottom:0; width:100%;" ${isCustomTime ? 'required' : ''}><button type="button" title="Back to dropdown" onclick="this.parentElement.style.display='none'; this.parentElement.previousElementSibling.style.display='block';">▼</button></div>`;
+            div.innerHTML = `<div class="status-badge" id="status-${rowId}" title="Pending"></div><select class="day-input">${dayOptions}</select><div style="flex:1;">${locSelectHtml}${locInputHtml}</div><div style="flex:1;">${timeSelectHtml}${timeInputHtml}</div><button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>`;
             scheduleContainer.appendChild(div);
         }
 
@@ -354,38 +334,93 @@
                 const locSelect = row.querySelector(".loc-input");
                 const locInput = row.querySelector(".loc-input-text");
                 const loc = locSelect.style.display === 'none' ? locInput.value.trim() : locSelect.value.trim();
-
                 const day = row.querySelector(".day-input").value;
-
                 const timeSelect = row.querySelector(".time-input");
                 const timeInput = row.querySelector(".time-input-text");
                 const time = timeSelect.style.display === 'none' ? timeInput.value.trim() : timeSelect.value.trim();
-
                 if (loc && time && loc !== '__CUSTOM__' && time !== '__CUSTOM__') {
-                    schedule.push({
-                        "Location": loc,
-                        "Day": day,
-                        "Time": time,
-                        "rowId": row.id // keep track of rowId to update status
-                    });
+                    schedule.push({ "Location": loc, "Day": day, "Time": time, "rowId": row.id });
                 }
             });
             return schedule;
         }
 
-        function resetBadges() {
-            document.querySelectorAll(".status-badge").forEach(badge => {
-                badge.className = "status-badge";
-            });
-        }
-
         function clearSchedule() {
             scheduleContainer.innerHTML = '';
             rowCount = 0;
-            addScheduleRow(); // Add one empty row so it's not totally blank
-            document.getElementById('schedule-select').value = ''; // Reset dropdown
+            addScheduleRow();
+            document.getElementById('schedule-select').value = '';
+            currentScheduleFilename = "";
         }
 
+        // --- Scraper Logic ---
+        const scraperOutput = document.getElementById("scraper-output");
+        const scrapedClassesContainer = document.getElementById("scraped-classes-container");
+        const scrapeButton = document.getElementById("scrape-button");
+        const runScrapedButton = document.getElementById("run-scraped-button");
+        let scrapeWs = null;
+
+        function startScraper() {
+            scraperOutput.innerHTML = "";
+            scrapedClassesContainer.innerHTML = "";
+            scrapeButton.disabled = true;
+            runScrapedButton.disabled = true;
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/ws/scrape`;
+            scrapeWs = new WebSocket(wsUrl);
+            scrapeWs.onopen = () => {
+                scrapeWs.send(JSON.stringify({
+                    email: emailEl.value,
+                    password: passwordEl.value,
+                    student_id: studentIdEl.value
+                }));
+            };
+            scrapeWs.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.log) {
+                    scraperOutput.innerHTML += data.log + "\n";
+                } else if (data.error) {
+                    scraperOutput.innerHTML += `ERROR: ${data.error}\n`;
+                } else {
+                    addScrapedClassRow(data);
+                }
+            };
+
+            scrapeWs.onerror = (event) => {
+                console.error("WebSocket error observed:", event);
+                scraperOutput.innerHTML += "WebSocket connection error. Check the browser console for details.\n";
+            };
+
+            scrapeWs.onclose = () => {
+                scrapeButton.disabled = false;
+                if(scrapedClassesContainer.children.length > 0) {
+                    runScrapedButton.disabled = false;
+                }
+            };
+        }
+
+        function addScrapedClassRow(classInfo) {
+            const div = document.createElement("div");
+            div.className = "scraped-class-row";
+            div.innerHTML = `
+                <input type="checkbox" checked data-class-info='${JSON.stringify(classInfo)}'>
+                <span>${classInfo.Day}</span>
+                <span>${classInfo.Time}</span>
+                <span>${classInfo.Location}</span>
+                <a href="${classInfo.link}" target="_blank" onclick="event.stopPropagation();">Link</a>
+            `;
+            scrapedClassesContainer.appendChild(div);
+        }
+
+        function getScrapedScheduleData() {
+            const schedule = [];
+            scrapedClassesContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                schedule.push(JSON.parse(checkbox.dataset.classInfo));
+            });
+            return schedule;
+        }
+
+        // --- Common Automation Logic ---
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
             statusIndicator.innerText = text;
@@ -398,8 +433,6 @@
             }
         }
 
-        let isStopped = false;
-
         function stopAutomation() {
             if (ws) {
                 isStopped = true;
@@ -408,45 +441,9 @@
             }
         }
 
-        function appendToTerminal(text) {
-            terminal.innerHTML += text + "<br>";
-            terminal.scrollTop = terminal.scrollHeight;
-
-            // Very simple visual feedback parsing based on logs
-            // (A more robust solution would send structured JSON events from the Python script)
-            const scheduleData = getScheduleData(); // re-fetch to get current order
-
-            if (text.includes("--- Processing class")) {
-                // E.g. "--- Processing class 1/2" -> extract index 1
-                const match = text.match(/Processing class (\d+)\//);
-                if (match) {
-                    const idx = parseInt(match[1]) - 1;
-                    if (scheduleData[idx]) {
-                        const badgeId = `status-${scheduleData[idx].rowId}`;
-                        const badge = document.getElementById(badgeId);
-                        if (badge) badge.className = "status-badge status-processing";
-                    }
-                }
-            } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment") || text.includes("Cart item count is now")) {
-                // If we see these, it usually means the class processing finished.
-                // We'll mark the currently "processing" one as done (green).
-                const processingBadge = document.querySelector(".status-processing");
-                if (processingBadge) processingBadge.className = "status-badge status-done";
-            } else if (text.includes("ERROR - Failed to enroll")) {
-                 const processingBadge = document.querySelector(".status-processing");
-                 if (processingBadge) processingBadge.className = "status-badge status-failed";
-            }
-        }
-
-        async function startAutomation() {
-            const email = document.getElementById("email").value;
-            const password = document.getElementById("password").value;
-            const student_id = document.getElementById("student_id").value;
-            const promo_code = document.getElementById("promo_code").value;
-            const schedule = getScheduleData();
-
-            // Silently update the .env file with the last run schedule
-            if (currentScheduleFilename) {
+        async function startAutomation(fromScraper = false) {
+            const schedule = fromScraper ? getScrapedScheduleData() : getScheduleData();
+            if (!fromScraper && currentScheduleFilename) {
                 try {
                     await fetch('/api/update-default-schedule', {
                         method: 'POST',
@@ -457,19 +454,17 @@
                     console.error("Could not update default schedule in .env:", error);
                 }
             }
-
-            if (!email || !password || !student_id) {
+            if (!emailEl.value || !passwordEl.value || !studentIdEl.value) {
                 alert("Please fill in all credentials.");
                 return;
             }
-
             if (schedule.length === 0) {
                 alert("Please add at least one valid class to the schedule.");
                 return;
             }
 
             terminal.innerHTML = "";
-            resetBadges();
+            document.querySelectorAll(".status-badge").forEach(b => b.className = "status-badge");
             updateStatus("running", "Running...");
             isStopped = false;
 
@@ -478,27 +473,25 @@
             ws = new WebSocket(wsUrl);
 
             ws.onopen = function() {
-                // Send configuration as the first message
                 ws.send(JSON.stringify({
-                    email: email,
-                    password: password,
-                    student_id: student_id,
-                    promo_code: promo_code,
-                    schedule: schedule
+                    email: emailEl.value,
+                    password: passwordEl.value,
+                    student_id: studentIdEl.value,
+                    promo_code: promoCodeEl.value,
+                    schedule: schedule,
+                    from_scraper: fromScraper
                 }));
             };
 
             ws.onmessage = function(event) {
-                appendToTerminal(event.data);
+                terminal.innerHTML += event.data + "<br>";
+                terminal.scrollTop = terminal.scrollHeight;
             };
 
-            ws.onclose = function(event) {
-                if (isStopped) return; // Status already set by stopAutomation
-
+            ws.onclose = function() {
+                if (isStopped) return;
                 if (terminal.innerHTML.includes("successfully")) {
-                    const total = document.querySelectorAll(".schedule-row").length;
-                    const done = document.querySelectorAll(".status-done").length;
-                    updateStatus("success", `Completed: Added ${done} of ${total} scheduled classes`);
+                    updateStatus("success", "Completed");
                 } else if (terminal.innerHTML.includes("failed") || terminal.innerHTML.includes("Error")) {
                     updateStatus("error", "Failed");
                 } else {
@@ -507,7 +500,7 @@
             };
 
             ws.onerror = function(error) {
-                appendToTerminal("WebSocket Error: " + error);
+                terminal.innerHTML += "WebSocket Error: " + error + "<br>";
                 updateStatus("error", "Connection Error");
             };
         }
