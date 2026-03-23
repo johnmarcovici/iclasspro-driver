@@ -4,6 +4,9 @@ import os
 import sys
 from typing import List, Dict
 
+# Add current directory to sys.path to help with module resolution
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 from dotenv import load_dotenv, set_key, find_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
@@ -29,7 +32,10 @@ load_dotenv(override=True)
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
 
-# Ensure templates directory exists
+# Mount static files for templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Ensure templates and schedules directories exist
 os.makedirs("templates", exist_ok=True)
 os.makedirs("schedules/tmp", exist_ok=True)
 
@@ -46,6 +52,8 @@ async def get(request: Request):
         "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
         "initial_schedule": [],
         "default_schedule_filename": None,
+        # Set base_url for the template to use, especially for WebSocket connections
+        "base_url": os.getenv("ICLASS_BASE_URL", "http://localhost:8000"),
     }
 
     # Try to load the default schedule from .env to pre-populate the grid
@@ -140,6 +148,9 @@ async def websocket_endpoint(websocket: WebSocket):
         schedule = config.get("schedule", [])
         from_scraper = config.get("from_scraper", False)
 
+        # Get base_url from env or default to localhost:8000
+        base_url = os.getenv("ICLASS_BASE_URL", "http://localhost:8000")
+
         if not all([email, password, student_id]):
             await websocket.send_text(
                 "Error: Email, password, and student ID are required."
@@ -157,7 +168,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text("Starting iClassPro automation...")
 
         cmd_args = [
-            sys.executable,
+            sys.executable,  # Use sys.executable for the correct python interpreter
             "iclasspro.py",
             "--email",
             email,
@@ -165,6 +176,8 @@ async def websocket_endpoint(websocket: WebSocket):
             password,
             "--student-id",
             str(student_id),
+            "--base-url",  # Pass base_url as a command-line argument
+            base_url,
         ]
         if promo_code:
             cmd_args.extend(["--promo-code", promo_code])
@@ -220,9 +233,16 @@ async def websocket_scrape_endpoint(websocket: WebSocket):
             )
             return
         await websocket.send_text(json.dumps({"log": "Starting scraper..."}))
-        async for class_info in scrape_available_classes(email, password, student_id):
+        # --- FIX START ---
+        # Instantiate IClassPro with the base_url
+        base_url = os.getenv("ICLASS_BASE_URL", "http://localhost:8000")
+        # Pass base_url to scrape_available_classes
+        async for class_info in scrape_available_classes(
+            email, password, student_id, base_url
+        ):
             await websocket.send_text(json.dumps(class_info))
         await websocket.send_text(json.dumps({"log": "Scraping complete."}))
+        # --- FIX END ---
     except WebSocketDisconnect:
         pass
     except Exception as e:

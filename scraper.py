@@ -4,13 +4,13 @@ import os
 from iclasspro import IClassPro
 
 
-async def scrape_available_classes(email, password, student_id):
+async def scrape_available_classes(email, password, student_id, base_url):
     """
     Logs into iClassPro, scrapes all available classes for the given student,
     and yields them as dictionaries.
     """
     print("Initializing scraper...")
-    driver = IClassPro()
+    driver = IClassPro(base_url=base_url)  # Pass base_url here
     try:
         await driver.init_system()
         print(f"Logging in as {email}...")
