@@ -7,6 +7,7 @@ import os
 import re
 import smtplib
 import time
+import pandas as pd
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -428,15 +429,20 @@ def main():
     summary_data = []
 
     try:
+        logging.info("Hi John")
         with open(args.schedule, "r") as f:
             schedule = json.load(f)
+
+        if schedule:
+            schedule_df = pd.DataFrame(schedule)
+            logging.info(f"Schedule to process:\n{schedule_df.to_string()}")
 
         driver.webdriver()
         driver.login(email=args.email, password=args.password)
 
         for i, class_info in enumerate(schedule):
             logging.info(
-                f"--- Processing class {i+1}/{len(schedule)}: {class_info} ---"
+                f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(class_info, indent=4)} ---"
             )
             try:
                 driver.enroll(
