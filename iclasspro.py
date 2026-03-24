@@ -429,20 +429,23 @@ def main():
     summary_data = []
 
     try:
-        logging.info("Hi John")
         with open(args.schedule, "r") as f:
             schedule = json.load(f)
 
         if schedule:
             schedule_df = pd.DataFrame(schedule)
-            logging.info(f"Schedule to process:\n{schedule_df.to_string()}")
+            if "rowId" in schedule_df.columns:
+                schedule_df = schedule_df.drop(columns=["rowId"])
+            logging.info(f"Schedule to process:\n{schedule_df.to_string(index=False)}")
 
         driver.webdriver()
         driver.login(email=args.email, password=args.password)
 
         for i, class_info in enumerate(schedule):
+            # Create a copy for logging that excludes internal metadata
+            log_info = {k: v for k, v in class_info.items() if k != "rowId"}
             logging.info(
-                f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(class_info, indent=4)} ---"
+                f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
             )
             try:
                 driver.enroll(
