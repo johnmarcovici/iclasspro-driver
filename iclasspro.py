@@ -36,13 +36,26 @@ def send_log_email(
         with open(log_file_path, "r") as f:
             log_content = f.read()
 
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"iClassPro Enrollment Log ({subject_status})"
-        msg["From"] = from_addr
-        msg["To"] = to_addr
+            success_count = sum(
+                1 for item in summary_data if item.get("status") == "Success"
+            )
+            total_count = len(summary_data)
+            if success_count == total_count:
+                subject_text = f"Added {success_count} of {total_count} classes"
+            else:
+                subject_text = (
+                    f"Enrollment Report: {success_count}/{total_count} Successful"
+                )
 
-        text_content = f"Enrollment Status: {subject_status}\n\n"
-        html_content = f"<h2>Enrollment Status: {subject_status}</h2>"
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"iClassPro: {subject_text} ({subject_status})"
+            msg["From"] = from_addr
+            msg["To"] = to_addr
+
+            text_content = f"Enrollment Status: {subject_status} ({subject_text})\n\n"
+            html_content = (
+                f"<h2>Enrollment Status: {subject_status} ({subject_text})</h2>"
+            )
 
         if summary_data:
             text_content += "Summary:\n"
