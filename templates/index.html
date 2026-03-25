@@ -87,6 +87,66 @@
             background-color: #dc3545 !important;
             color: white !important;
         }
+
+        /* Tab navigation */
+        .tab-nav {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--primary);
+            margin-bottom: 1.5rem;
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            border-radius: 0;
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 1rem;
+            margin-bottom: -2px;
+            padding: 0.6rem 1.2rem;
+            width: auto;
+        }
+        .tab-btn:hover {
+            background: none;
+            color: var(--primary);
+        }
+        .tab-btn.active {
+            border-bottom-color: var(--primary);
+            color: var(--primary);
+            font-weight: bold;
+        }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Discovered-classes table */
+        #discovered-classes-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.5rem;
+        }
+        #discovered-classes-table th,
+        #discovered-classes-table td {
+            padding: 0.4rem 0.6rem;
+            text-align: left;
+            border-bottom: 1px solid var(--table-border-color, #dee2e6);
+        }
+        #discovered-classes-table th { font-weight: bold; }
+        #discovered-classes-table input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        .discover-terminal {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 5px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -95,6 +155,15 @@
             <h1>iClassPro Enrollment Bot</h1>
             <h2>Automate your class signups</h2>
         </hgroup>
+
+        <!-- Tab navigation -->
+        <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
+            <button class="tab-btn" onclick="switchTab('discover', this)">🔍 Discover &amp; Enroll</button>
+        </div>
+
+        <!-- ===== TAB 1: Manual Enrollment (existing functionality) ===== -->
+        <div id="tab-manual" class="tab-panel active">
 
         <!-- Configuration Settings -->
         <details open>
@@ -174,6 +243,67 @@
             <h4>Live Output</h4>
             <div id="terminal">Waiting to start...</div>
         </section>
+
+        </div><!-- end #tab-manual -->
+
+        <!-- ===== TAB 2: Discover & Enroll ===== -->
+        <div id="tab-discover" class="tab-panel">
+            <p style="margin-bottom:1rem; color: var(--muted-color);">
+                Credentials entered in the <strong>Configuration &amp; Credentials</strong> section are shared between both tabs.
+            </p>
+
+            <!-- Discovery controls -->
+            <section style="margin-top:0;">
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0;">🔍 Discover Available Classes</button>
+                    <button id="stop-discover-button" class="secondary outline" onclick="stopDiscovery()" style="margin-bottom:0; border-color:#dc3545; color:#dc3545;" disabled>⏹ Stop</button>
+                </div>
+                <p style="margin-top:0.75rem;">Status: <span id="discover-status" class="status-idle">Idle</span></p>
+            </section>
+
+            <section>
+                <h4>Discovery Output</h4>
+                <div id="discover-terminal" class="discover-terminal">Waiting to start...</div>
+            </section>
+
+            <!-- Discovered classes table (hidden until results arrive) -->
+            <section id="discovered-section" style="display:none;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                    <h4 style="margin:0;">Available Classes</h4>
+                    <div style="display:flex; gap:0.5rem;">
+                        <button class="secondary" onclick="selectAllClasses()" style="width:auto; margin-bottom:0;">Select All</button>
+                        <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect All</button>
+                    </div>
+                </div>
+                <table id="discovered-classes-table">
+                    <thead>
+                        <tr>
+                            <th>✓</th>
+                            <th>Class</th>
+                            <th>Day</th>
+                            <th>Time</th>
+                            <th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody id="classes-table-body"></tbody>
+                </table>
+            </section>
+
+            <!-- Enroll selected controls (hidden until classes are discovered) -->
+            <section id="enroll-selected-section" style="display:none;">
+                <div style="display:flex; gap:1rem; align-items:center;">
+                    <button id="enroll-selected-button" onclick="startSelectedEnrollment()" style="margin-bottom:0;">▶ Enroll Selected Classes</button>
+                    <button id="stop-enroll-button" class="secondary outline" onclick="stopSelectedEnrollment()" style="margin-bottom:0; border-color:#dc3545; color:#dc3545;" disabled>⏹ Stop</button>
+                </div>
+                <p style="margin-top:0.75rem;">Status: <span id="enroll-selected-status" class="status-idle">Idle</span></p>
+            </section>
+
+            <section id="enroll-selected-output" style="display:none;">
+                <h4>Enrollment Output</h4>
+                <div id="enroll-selected-terminal" class="discover-terminal">Waiting to start...</div>
+            </section>
+        </div><!-- end #tab-discover -->
+
     </main>
 
     <script>
@@ -510,6 +640,236 @@
                 appendToTerminal("WebSocket Error: " + error);
                 updateStatus("error", "Connection Error");
             };
+        }
+
+        // ===== Tab switching =====
+        function switchTab(name, btn) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('tab-' + name).classList.add('active');
+            if (btn) btn.classList.add('active');
+        }
+
+        // ===== Tab 2: Discover & Enroll =====
+        let discoverWs = null;
+        let discoverStopped = false;
+        let discoveredClasses = [];
+
+        function startDiscovery() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            const student_id = document.getElementById("student_id").value;
+
+            if (!email || !password || !student_id) {
+                alert("Please fill in Email, Password, and Student ID in the Configuration & Credentials section first.");
+                switchTab('manual', document.querySelector('.tab-btn'));
+                return;
+            }
+
+            discoveredClasses = [];
+            document.getElementById('discover-terminal').innerHTML = '';
+            document.getElementById('discovered-section').style.display = 'none';
+            document.getElementById('enroll-selected-section').style.display = 'none';
+            document.getElementById('enroll-selected-output').style.display = 'none';
+            document.getElementById('classes-table-body').innerHTML = '';
+
+            discoverStopped = false;
+            const statusEl = document.getElementById('discover-status');
+            statusEl.className = 'status-running';
+            statusEl.innerText = 'Discovering...';
+            document.getElementById('discover-button').setAttribute('disabled', 'true');
+            document.getElementById('stop-discover-button').removeAttribute('disabled');
+
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            discoverWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
+
+            discoverWs.onopen = function() {
+                discoverWs.send(JSON.stringify({ email, password, student_id }));
+            };
+
+            discoverWs.onmessage = function(event) {
+                const text = event.data;
+                if (text.startsWith('CLASSES_JSON:')) {
+                    try {
+                        discoveredClasses = JSON.parse(text.substring('CLASSES_JSON:'.length));
+                        populateClassesTable(discoveredClasses);
+                    } catch(e) {
+                        appendToDiscoverTerminal('Error parsing class data: ' + e.message);
+                    }
+                    return;
+                }
+                appendToDiscoverTerminal(text);
+            };
+
+            discoverWs.onclose = function() {
+                if (discoverStopped) return;
+                document.getElementById('discover-button').removeAttribute('disabled');
+                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
+                const statusEl = document.getElementById('discover-status');
+                if (discoveredClasses.length > 0) {
+                    statusEl.className = 'status-success';
+                    statusEl.innerText = `Found ${discoveredClasses.length} class(es)`;
+                } else {
+                    statusEl.className = 'status-idle';
+                    statusEl.innerText = 'No classes found';
+                }
+            };
+
+            discoverWs.onerror = function() {
+                appendToDiscoverTerminal('WebSocket error during discovery.');
+                document.getElementById('discover-status').className = 'status-error';
+                document.getElementById('discover-status').innerText = 'Error';
+                document.getElementById('discover-button').removeAttribute('disabled');
+                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
+            };
+        }
+
+        function stopDiscovery() {
+            if (discoverWs) {
+                discoverStopped = true;
+                discoverWs.close();
+                document.getElementById('discover-status').className = 'status-idle';
+                document.getElementById('discover-status').innerText = 'Stopped';
+                document.getElementById('discover-button').removeAttribute('disabled');
+                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
+            }
+        }
+
+        function appendToDiscoverTerminal(text) {
+            const t = document.getElementById('discover-terminal');
+            t.innerHTML += escapeHtml(text) + '<br>';
+            t.scrollTop = t.scrollHeight;
+        }
+
+        function populateClassesTable(classes) {
+            const tbody = document.getElementById('classes-table-body');
+            tbody.innerHTML = '';
+            classes.forEach(function(cls, idx) {
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td><input type="checkbox" class="class-checkbox" data-index="' + idx + '" checked></td>' +
+                    '<td>' + escapeHtml(cls.name || '—') + '</td>' +
+                    '<td>' + escapeHtml(cls.day || '—') + '</td>' +
+                    '<td>' + escapeHtml(cls.time || '—') + '</td>' +
+                    '<td>' + escapeHtml(cls.location || '—') + '</td>';
+                tbody.appendChild(tr);
+            });
+            document.getElementById('discovered-section').style.display = 'block';
+            document.getElementById('enroll-selected-section').style.display = 'block';
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.appendChild(document.createTextNode(str));
+            return d.innerHTML;
+        }
+
+        function selectAllClasses() {
+            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = true; });
+        }
+
+        function deselectAllClasses() {
+            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = false; });
+        }
+
+        // ===== Enroll selected discovered classes =====
+        let enrollSelectedWs = null;
+        let enrollSelectedStopped = false;
+
+        function startSelectedEnrollment() {
+            const email = document.getElementById("email").value;
+            const password = document.getElementById("password").value;
+            const student_id = document.getElementById("student_id").value;
+            const promo_code = document.getElementById("promo_code").value;
+
+            if (!email || !password || !student_id) {
+                alert("Please fill in Email, Password, and Student ID in the Configuration & Credentials section first.");
+                switchTab('manual', document.querySelector('.tab-btn'));
+                return;
+            }
+
+            const selected = [];
+            document.querySelectorAll('.class-checkbox:checked').forEach(function(cb) {
+                const idx = parseInt(cb.dataset.index);
+                if (discoveredClasses[idx]) {
+                    selected.push(discoveredClasses[idx]);
+                }
+            });
+
+            if (selected.length === 0) {
+                alert("Please select at least one class to enroll.");
+                return;
+            }
+
+            document.getElementById('enroll-selected-terminal').innerHTML = '';
+            document.getElementById('enroll-selected-output').style.display = 'block';
+            enrollSelectedStopped = false;
+
+            const statusEl = document.getElementById('enroll-selected-status');
+            statusEl.className = 'status-running';
+            statusEl.innerText = 'Enrolling...';
+            document.getElementById('enroll-selected-button').setAttribute('disabled', 'true');
+            document.getElementById('stop-enroll-button').removeAttribute('disabled');
+
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            enrollSelectedWs = new WebSocket(`${protocol}//${window.location.host}/ws/enroll-selected`);
+
+            enrollSelectedWs.onopen = function() {
+                enrollSelectedWs.send(JSON.stringify({
+                    email: email,
+                    password: password,
+                    student_id: student_id,
+                    promo_code: promo_code,
+                    selected_classes: selected
+                }));
+            };
+
+            enrollSelectedWs.onmessage = function(event) {
+                appendToEnrollSelectedTerminal(event.data);
+            };
+
+            enrollSelectedWs.onclose = function() {
+                if (enrollSelectedStopped) return;
+                document.getElementById('enroll-selected-button').removeAttribute('disabled');
+                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
+                const statusEl = document.getElementById('enroll-selected-status');
+                const content = document.getElementById('enroll-selected-terminal').innerHTML;
+                if (content.includes('successfully')) {
+                    statusEl.className = 'status-success';
+                    statusEl.innerText = 'Completed';
+                } else if (content.includes('failed') || content.includes('Error')) {
+                    statusEl.className = 'status-error';
+                    statusEl.innerText = 'Failed';
+                } else {
+                    statusEl.className = 'status-idle';
+                    statusEl.innerText = 'Done';
+                }
+            };
+
+            enrollSelectedWs.onerror = function() {
+                appendToEnrollSelectedTerminal('WebSocket error during enrollment.');
+                document.getElementById('enroll-selected-status').className = 'status-error';
+                document.getElementById('enroll-selected-status').innerText = 'Error';
+                document.getElementById('enroll-selected-button').removeAttribute('disabled');
+                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
+            };
+        }
+
+        function stopSelectedEnrollment() {
+            if (enrollSelectedWs) {
+                enrollSelectedStopped = true;
+                enrollSelectedWs.close();
+                document.getElementById('enroll-selected-status').className = 'status-idle';
+                document.getElementById('enroll-selected-status').innerText = 'Stopped';
+                document.getElementById('enroll-selected-button').removeAttribute('disabled');
+                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
+            }
+        }
+
+        function appendToEnrollSelectedTerminal(text) {
+            const t = document.getElementById('enroll-selected-terminal');
+            t.innerHTML += escapeHtml(text) + '<br>';
+            t.scrollTop = t.scrollHeight;
         }
     </script>
 </body>

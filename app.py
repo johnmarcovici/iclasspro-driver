@@ -123,6 +123,170 @@ async def save_schedule(request: ScheduleSaveRequest):
     return {"message": f"Successfully saved {safe_filename}"}
 
 
+@app.websocket("/ws/scrape")
+async def websocket_scrape(websocket: WebSocket):
+    await websocket.accept()
+    process = None
+
+    try:
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                "Error: Email, password, and student ID are required."
+            )
+            await websocket.close()
+            return
+
+        await websocket.send_text("Starting class discovery scrape...")
+
+        cmd_args = [
+            "iclasspro.py",
+            "--email",
+            email,
+            "--password",
+            password,
+            "--student-id",
+            str(student_id),
+            "--scrape",
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8").rstrip()
+            await websocket.send_text(text_line)
+
+        await process.wait()
+
+        if process.returncode != 0 and process.returncode not in (-15, -9):
+            await websocket.send_text(
+                f"Discovery failed with exit code {process.returncode}."
+            )
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"Error: {str(e)}")
+        except Exception:
+            pass
+    finally:
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/enroll-selected")
+async def websocket_enroll_selected(websocket: WebSocket):
+    await websocket.accept()
+    process = None
+
+    try:
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+        promo_code = config.get("promo_code", "")
+        selected_classes = config.get("selected_classes", [])
+
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                "Error: Email, password, and student ID are required."
+            )
+            await websocket.close()
+            return
+
+        if not selected_classes:
+            await websocket.send_text("Error: No classes selected for enrollment.")
+            await websocket.close()
+            return
+
+        # Save selected classes to a temporary file
+        tmp_path = "schedules/tmp/discovered_schedule.json"
+        with open(tmp_path, "w") as f:
+            json.dump(selected_classes, f)
+
+        await websocket.send_text("Starting enrollment of selected classes...")
+
+        cmd_args = [
+            "iclasspro.py",
+            "--email",
+            email,
+            "--password",
+            password,
+            "--student-id",
+            str(student_id),
+            "--enroll-urls",
+            tmp_path,
+        ]
+
+        if promo_code:
+            cmd_args.extend(["--promo-code", promo_code])
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8").rstrip()
+            await websocket.send_text(text_line)
+
+        await process.wait()
+
+        if process.returncode == 0:
+            await websocket.send_text("Enrollment completed successfully.")
+        elif process.returncode not in (-15, -9):
+            await websocket.send_text(
+                f"Enrollment failed with exit code {process.returncode}."
+            )
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"Error: {str(e)}")
+        except Exception:
+            pass
+    finally:
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.websocket("/ws/run")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()

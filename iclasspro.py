@@ -10,6 +10,7 @@ import time
 import pandas as pd
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse, urljoin
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -140,12 +141,10 @@ class IClassPro:
             extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
         )
         # Add anti-bot-detection scripts
-        self.context.add_init_script(
-            """
+        self.context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => false});
             Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            """
-        )
+            """)
         self.page = self.context.new_page()
         Stealth().apply_stealth_sync(self.page)
         logging.info("Browser launched successfully.")
@@ -332,6 +331,141 @@ class IClassPro:
 
         logging.info("Cart processing complete.")
 
+    def scrape_classes(self, student_id: int) -> list:
+        """Scrape all available classes from the portal, iterating over each day."""
+        discovered = []
+        seen_urls = set()
+        known_locations = ["El Segundo", "Santa Monica", "Culver", "Echo"]
+        days = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ]
+
+        for day_idx, day_name in enumerate(days, start=1):
+            logging.info(f"Scraping classes for {day_name}...")
+            url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
+            self.page.goto(url, wait_until="load")
+            self.page.wait_for_timeout(2000)
+            self.take_screenshot(f"scrape_{day_name.lower()}.png", full_page=True)
+
+            all_anchors = self.page.locator("a").all()
+            for anchor in all_anchors:
+                try:
+                    text = (anchor.text_content() or "").strip()
+                    href = anchor.get_attribute("href") or ""
+
+                    # Only process links whose text contains a time pattern like "at 5:45am"
+                    time_match = re.search(
+                        r"\bat\s+(\d{1,2}:\d{2}(?:am|pm))", text, re.IGNORECASE
+                    )
+                    if not time_match or not href:
+                        continue
+
+                    # Build absolute URL
+                    if href.startswith("http"):
+                        class_url = href
+                    else:
+                        class_url = urljoin(self.base_url, href)
+
+                    if class_url in seen_urls:
+                        continue
+                    seen_urls.add(class_url)
+
+                    time_str = time_match.group(1)
+
+                    # Try to extract class name and location from parent container
+                    name = ""
+                    location = ""
+                    try:
+                        # Walk up to the nearest card/list-item/article ancestor
+                        parent = anchor.locator(
+                            "xpath=./ancestor::*["
+                            "contains(@class,'card') or "
+                            "contains(@class,'class') or "
+                            "contains(@class,'item') or "
+                            "self::article or self::li"
+                            "][1]"
+                        ).first
+                        parent_text = (parent.text_content() or "").strip()
+
+                        # Grab the first heading-like element in the parent
+                        heading_el = parent.locator(
+                            "h1, h2, h3, h4, h5, h6, strong"
+                        ).first
+                        candidate = (heading_el.text_content() or "").strip()
+                        if candidate and "at " not in candidate.lower():
+                            name = candidate
+
+                        # Match known locations in parent text
+                        for loc in known_locations:
+                            if loc.lower() in parent_text.lower():
+                                location = loc
+                                break
+                    except Exception:
+                        pass
+
+                    # Fallback: derive name from the text before "at TIME"
+                    if not name:
+                        name_part = re.sub(
+                            r"\bat\s+\d{1,2}:\d{2}(?:am|pm).*",
+                            "",
+                            text,
+                            flags=re.IGNORECASE,
+                        ).strip()
+                        name = name_part if name_part else text
+
+                    discovered.append(
+                        {
+                            "name": name,
+                            "location": location,
+                            "day": day_name,
+                            "time": time_str,
+                            "url": class_url,
+                        }
+                    )
+                    logging.info(
+                        f"  Found: {day_name} at {time_str} — {name}"
+                        f" ({location or 'location unknown'})"
+                    )
+                except Exception as e:
+                    logging.debug(f"Error processing anchor: {e}")
+
+        logging.info(f"Discovery complete. Found {len(discovered)} class(es).")
+        return discovered
+
+    def enroll_by_url(self, url: str, class_index: int) -> None:
+        """Navigate directly to a class URL and add it to the cart."""
+        logging.info(f"Enrolling via direct URL: {url}")
+        self.page.goto(url, wait_until="load")
+        self.take_screenshot(f"classes_page_url_{class_index}.png", full_page=True)
+
+        # Wait for and click "Enroll Now"
+        enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
+        enroll_now_button.wait_for(state="visible", timeout=15000)
+        enroll_now_button.click()
+
+        # Get initial cart count before adding
+        initial_cart_count = self._get_cart_item_count()
+
+        # Wait for and click "Add to Cart"
+        add_to_cart_button = self.page.locator("button:has-text('Add to Cart')")
+        add_to_cart_button.wait_for(state="visible", timeout=15000)
+        add_to_cart_button.click()
+
+        # Verify cart count increased
+        final_cart_count = self._wait_for_cart_item_count(
+            min_count=initial_cart_count + 1
+        )
+        if final_cart_count < initial_cart_count + 1:
+            raise RuntimeError("Failed to verify that the class was added to the cart.")
+
+        self.take_screenshot(f"after_add_to_cart_url_{class_index}.png", full_page=True)
+
     def close(self):
         """Safely close the browser and Playwright instances."""
         if self.browser:
@@ -350,6 +484,18 @@ def main():
         type=str,
         default=os.getenv("ICLASS_BASE_URL", "https://portal.iclasspro.com/scaq/"),
         help="Portal base URL",
+    )
+    parser.add_argument(
+        "--scrape",
+        action="store_true",
+        default=False,
+        help="Scrape available classes and print as JSON instead of enrolling.",
+    )
+    parser.add_argument(
+        "--enroll-urls",
+        type=str,
+        default=None,
+        help="Path to JSON file with URL-based class list for enrollment.",
     )
     parser.add_argument(
         "--schedule",
@@ -432,54 +578,108 @@ def main():
         f"Password: {'*' * len(args.password) if args.password else 'Not set'}"
     )
     logging.info(f"Student ID: {args.student_id}")
-    logging.info(f"Using schedule: {args.schedule}")
 
     driver = IClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
     main_exception = None
     summary_data = []
 
     try:
-        with open(args.schedule, "r") as f:
-            schedule = json.load(f)
+        if args.scrape:
+            # --- Scrape mode: discover available classes and emit JSON ---
+            logging.info("Mode: scrape available classes")
+            driver.webdriver()
+            driver.login(email=args.email, password=args.password)
+            classes = driver.scrape_classes(student_id=args.student_id)
+            # Emit a single parseable line that the web UI will detect
+            print(f"CLASSES_JSON:{json.dumps(classes)}")
+            logging.info("All operations completed.")
 
-        if schedule:
-            schedule_df = pd.DataFrame(schedule)
-            if "rowId" in schedule_df.columns:
-                schedule_df = schedule_df.drop(columns=["rowId"])
-            logging.info(f"Schedule to process:\n{schedule_df.to_string(index=False)}")
+        elif args.enroll_urls:
+            # --- URL-based enrollment mode ---
+            logging.info(f"Mode: enroll from URL list: {args.enroll_urls}")
+            with open(args.enroll_urls, "r") as f:
+                url_schedule = json.load(f)
 
-        driver.webdriver()
-        driver.login(email=args.email, password=args.password)
+            if url_schedule:
+                log_df = pd.DataFrame(url_schedule)
+                if "url" in log_df.columns:
+                    log_df = log_df.drop(columns=["url"])
+                logging.info(
+                    f"URL-based schedule to process:\n{log_df.to_string(index=False)}"
+                )
 
-        for i, class_info in enumerate(schedule):
-            # Create a copy for logging that excludes internal metadata
-            log_info = {k: v for k, v in class_info.items() if k != "rowId"}
-            logging.info(
-                f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
+            driver.webdriver()
+            driver.login(email=args.email, password=args.password)
+
+            for i, class_info in enumerate(url_schedule):
+                log_info = {k: v for k, v in class_info.items() if k != "url"}
+                logging.info(
+                    f"--- Processing class {i+1}/{len(url_schedule)}: \n{json.dumps(log_info, indent=4)} ---"
+                )
+                try:
+                    driver.enroll_by_url(url=class_info["url"], class_index=i)
+                    summary_data.append(
+                        {"class": class_info, "status": "Success", "error": ""}
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to enroll in class {class_info}: {e}")
+                    summary_data.append(
+                        {"class": class_info, "status": "Failed", "error": str(e)}
+                    )
+                    driver.take_screenshot(f"error_class_{i}.png")
+
+            driver.process_cart(
+                promo_code=args.promo_code,
+                complete_transaction=args.complete_transaction,
             )
-            try:
-                driver.enroll(
-                    location=class_info["Location"],
-                    timestr=class_info["Time"],
-                    daystr=class_info["Day"],
-                    student_id=args.student_id,
-                    class_index=i,
-                )
-                summary_data.append(
-                    {"class": class_info, "status": "Success", "error": ""}
-                )
-            except Exception as e:
-                logging.error(f"Failed to enroll in class {class_info}: {e}")
-                summary_data.append(
-                    {"class": class_info, "status": "Failed", "error": str(e)}
-                )
-                driver.take_screenshot(f"error_class_{i}.png")
+            logging.info("All operations completed.")
 
-        driver.process_cart(
-            promo_code=args.promo_code,
-            complete_transaction=args.complete_transaction,
-        )
-        logging.info("All operations completed.")
+        else:
+            # --- Original schedule-based enrollment mode ---
+            logging.info(f"Mode: schedule-based enrollment, schedule: {args.schedule}")
+            with open(args.schedule, "r") as f:
+                schedule = json.load(f)
+
+            if schedule:
+                schedule_df = pd.DataFrame(schedule)
+                if "rowId" in schedule_df.columns:
+                    schedule_df = schedule_df.drop(columns=["rowId"])
+                logging.info(
+                    f"Schedule to process:\n{schedule_df.to_string(index=False)}"
+                )
+
+            driver.webdriver()
+            driver.login(email=args.email, password=args.password)
+
+            for i, class_info in enumerate(schedule):
+                # Create a copy for logging that excludes internal metadata
+                log_info = {k: v for k, v in class_info.items() if k != "rowId"}
+                logging.info(
+                    f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
+                )
+                try:
+                    driver.enroll(
+                        location=class_info["Location"],
+                        timestr=class_info["Time"],
+                        daystr=class_info["Day"],
+                        student_id=args.student_id,
+                        class_index=i,
+                    )
+                    summary_data.append(
+                        {"class": class_info, "status": "Success", "error": ""}
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to enroll in class {class_info}: {e}")
+                    summary_data.append(
+                        {"class": class_info, "status": "Failed", "error": str(e)}
+                    )
+                    driver.take_screenshot(f"error_class_{i}.png")
+
+            driver.process_cart(
+                promo_code=args.promo_code,
+                complete_transaction=args.complete_transaction,
+            )
+            logging.info("All operations completed.")
 
     except Exception as e:
         logging.critical(f"A critical error occurred: {e}")
@@ -487,7 +687,7 @@ def main():
     finally:
         driver.close()
 
-        if args.send_email:
+        if args.send_email and not args.scrape:
             logging.info("Email sending is enabled. Checking credentials...")
             to_addr = args.email
             from_addr = args.email
