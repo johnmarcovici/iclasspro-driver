@@ -93,7 +93,7 @@ def send_log_email(
         logging.info("Log email sent successfully.")
 
     except Exception as e:
-        logging.error(f"Failed to send log email: {e}", exc_info=True)
+        logging.error(f"Failed to send log email: {e}")
 
 
 # --- Main Class ---
@@ -472,9 +472,7 @@ def main():
                     {"class": class_info, "status": "Success", "error": ""}
                 )
             except Exception as e:
-                logging.error(
-                    f"Failed to enroll in class {class_info}: {e}", exc_info=True
-                )
+                logging.error(f"Failed to enroll in class {class_info}: {e}")
                 summary_data.append(
                     {"class": class_info, "status": "Failed", "error": str(e)}
                 )
@@ -487,7 +485,7 @@ def main():
         logging.info("All operations completed.")
 
     except Exception as e:
-        logging.critical(f"A critical error occurred: {e}", exc_info=True)
+        logging.critical(f"A critical error occurred: {e}")
         main_exception = e
     finally:
         driver.close()
