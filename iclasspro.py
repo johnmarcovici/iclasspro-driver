@@ -28,7 +28,6 @@ def send_log_email(
     app_password,
     smtp_server,
     smtp_port,
-    subject_status,
     summary_data=None,
 ):
     """Reads the log file, prepends a summary, and sends its content in an email."""
@@ -48,14 +47,12 @@ def send_log_email(
                 )
 
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"iClassPro: {subject_text} ({subject_status})"
+            msg["Subject"] = f"iClassPro: {subject_text}"
             msg["From"] = from_addr
             msg["To"] = to_addr
 
-            text_content = f"Enrollment Status: {subject_status} ({subject_text})\n\n"
-            html_content = (
-                f"<h2>Enrollment Status: {subject_status} ({subject_text})</h2>"
-            )
+            text_content = f"iClassPro: {subject_text}\n\n"
+            html_content = f"<h2>iClassPro: {subject_text}</h2>"
 
         if summary_data:
             text_content += "Summary:\n"
@@ -499,7 +496,6 @@ def main():
             smtp_port = int(os.getenv("ICLASS_SMTP_PORT", 587))
 
             if all([to_addr, from_addr, app_password, smtp_server]):
-                status = "FAILURE" if main_exception else "SUCCESS"
                 send_log_email(
                     log_file,
                     to_addr,
@@ -507,7 +503,6 @@ def main():
                     app_password,
                     smtp_server,
                     smtp_port,
-                    status,
                     summary_data=summary_data,
                 )
             else:
