@@ -402,12 +402,6 @@ class IClassPro:
                         candidate = (heading_el.text_content() or "").strip()
                         if candidate and "at " not in candidate.lower():
                             name = candidate
-
-                        # Match known locations in parent text
-                        for loc in self.KNOWN_LOCATIONS:
-                            if loc.lower() in parent_text.lower():
-                                location = loc
-                                break
                     except Exception:
                         pass
 
@@ -420,6 +414,26 @@ class IClassPro:
                             flags=re.IGNORECASE,
                         ).strip()
                         name = name_part if name_part else text
+
+                    # Extract location: prefer the class name itself (e.g. "Culver:Sunday 03/29"),
+                    # then fall back to the anchor link text, then the broader parent text.
+                    # Checking the name first avoids false positives from nav/sidebar text that
+                    # may list multiple locations (causing the wrong location to be matched).
+                    for search_text in [name, text]:
+                        for loc in self.KNOWN_LOCATIONS:
+                            if loc.lower() in search_text.lower():
+                                location = loc
+                                break
+                        if location:
+                            break
+                    if not location:
+                        try:
+                            for loc in self.KNOWN_LOCATIONS:
+                                if loc.lower() in parent_text.lower():
+                                    location = loc
+                                    break
+                        except Exception:
+                            pass
 
                     discovered.append(
                         {
