@@ -337,7 +337,10 @@ class IClassPro:
     def scrape_classes(self, student_id: int) -> list:
         """Scrape all available classes from the portal, iterating over each day."""
         discovered = []
-        seen_urls = set()
+        # Deduplicate by (day, time, name) rather than by href/URL, because
+        # JS-navigated class cards often share a placeholder href (e.g. "#") which
+        # would cause every class after the first to be dropped as a "duplicate".
+        seen_keys = set()
         days = [
             "Sunday",
             "Monday",
@@ -353,6 +356,9 @@ class IClassPro:
             url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
             self.page.goto(url, wait_until="load")
             self.page.wait_for_timeout(2000)
+            # Scroll to the bottom so any lazily-rendered class cards are added to the DOM
+            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            self.page.wait_for_timeout(1000)
             self.take_screenshot(f"scrape_{day_name.lower()}.png", full_page=True)
 
             all_anchors = self.page.locator("a").all()
@@ -368,15 +374,12 @@ class IClassPro:
                     if not time_match or not href:
                         continue
 
-                    # Build absolute URL
+                    # Build absolute URL (best-effort; may be a fragment URL like
+                    # "https://…/#" when the card uses JS navigation)
                     if href.startswith("http"):
                         class_url = href
                     else:
                         class_url = urljoin(self.base_url, href)
-
-                    if class_url in seen_urls:
-                        continue
-                    seen_urls.add(class_url)
 
                     time_str = time_match.group(1)
 
@@ -434,6 +437,13 @@ class IClassPro:
                                     break
                         except Exception:
                             pass
+
+                    # Deduplicate by (day, time, name) — robust against JS-navigated cards
+                    # that share a placeholder href (e.g. "#").
+                    dedup_key = (day_name, time_str, name)
+                    if dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(dedup_key)
 
                     discovered.append(
                         {
@@ -633,7 +643,13 @@ def main():
                     f"--- Processing class {i+1}/{len(url_schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
                 try:
-                    driver.enroll_by_url(url=class_info["url"], class_index=i)
+                    driver.book_class(
+                        location=class_info.get("location", ""),
+                        timestr=class_info.get("time", ""),
+                        daystr=class_info.get("day", ""),
+                        student_id=args.student_id,
+                        class_index=i,
+                    )
                     summary_data.append(
                         {"class": class_info, "status": "Success", "error": ""}
                     )
