@@ -158,42 +158,45 @@
 
         <!-- Tab navigation -->
         <div class="tab-nav">
-            <button id="tab-btn-manual" class="tab-btn active" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
+            <button id="tab-btn-config" class="tab-btn active" onclick="switchTab('config', this)">⚙️ Configuration</button>
+            <button id="tab-btn-manual" class="tab-btn" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
             <button class="tab-btn" onclick="switchTab('discover', this)">🔍 Discover &amp; Enroll</button>
         </div>
 
-        <!-- ===== TAB 1: Manual Enrollment (existing functionality) ===== -->
-        <div id="tab-manual" class="tab-panel active">
+        <!-- ===== TAB 1: Configuration & Credentials ===== -->
+        <div id="tab-config" class="tab-panel active">
+            <details open>
+                <summary><strong>Configuration & Credentials</strong></summary>
+                <div class="grid">
+                    <label>
+                        Email
+                        <input type="email" id="email" value="{{ email }}" required>
+                    </label>
+                    <label>
+                        Password
+                        <div class="password-container">
+                            <input type="password" id="password" value="{{ password }}" required>
+                            <button type="button" class="password-toggle" onclick="togglePassword()" title="Toggle password visibility">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                        </div>
+                    </label>
+                </div>
+                <div class="grid">
+                    <label>
+                        Student ID
+                        <input type="number" id="student_id" value="{{ student_id }}" required>
+                    </label>
+                    <label>
+                        Promo Code (Optional)
+                        <input type="text" id="promo_code" value="{{ promo_code }}">
+                    </label>
+                </div>
+            </details>
+        </div><!-- end #tab-config -->
 
-        <!-- Configuration Settings -->
-        <details open>
-            <summary><strong>Configuration & Credentials</strong></summary>
-            <div class="grid">
-                <label>
-                    Email
-                    <input type="email" id="email" value="{{ email }}" required>
-                </label>
-                <label>
-                    Password
-                    <div class="password-container">
-                        <input type="password" id="password" value="{{ password }}" required>
-                        <button type="button" class="password-toggle" onclick="togglePassword()" title="Toggle password visibility">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        </button>
-                    </div>
-                </label>
-            </div>
-            <div class="grid">
-                <label>
-                    Student ID
-                    <input type="number" id="student_id" value="{{ student_id }}" required>
-                </label>
-                <label>
-                    Promo Code (Optional)
-                    <input type="text" id="promo_code" value="{{ promo_code }}">
-                </label>
-            </div>
-        </details>
+        <!-- ===== TAB 2: Manual Enrollment ===== -->
+        <div id="tab-manual" class="tab-panel">
 
         <!-- Schedule Editor -->
         <details open>
@@ -246,10 +249,10 @@
 
         </div><!-- end #tab-manual -->
 
-        <!-- ===== TAB 2: Discover & Enroll ===== -->
+        <!-- ===== TAB 3: Discover & Enroll ===== -->
         <div id="tab-discover" class="tab-panel">
             <p style="margin-bottom:1rem; color: var(--muted-color);">
-                Credentials entered in the <strong>Configuration &amp; Credentials</strong> section are shared between both tabs.
+                Credentials are shared from the <strong>⚙️ Configuration</strong> tab.
             </p>
 
             <!-- Discovery controls -->
@@ -661,8 +664,8 @@
             const student_id = document.getElementById("student_id").value;
 
             if (!email || !password || !student_id) {
-                alert("Please fill in Email, Password, and Student ID in the Configuration & Credentials section first.");
-                switchTab('manual', document.getElementById('tab-btn-manual'));
+                alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
+                switchTab('config', document.getElementById('tab-btn-config'));
                 return;
             }
 
@@ -783,8 +786,8 @@
             const promo_code = document.getElementById("promo_code").value;
 
             if (!email || !password || !student_id) {
-                alert("Please fill in Email, Password, and Student ID in the Configuration & Credentials section first.");
-                switchTab('manual', document.getElementById('tab-btn-manual'));
+                alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
+                switchTab('config', document.getElementById('tab-btn-config'));
                 return;
             }
 
