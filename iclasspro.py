@@ -98,6 +98,9 @@ def send_log_email(
 
 
 class IClassPro:
+    # Known location names used for both UI dropdowns and class-name extraction.
+    KNOWN_LOCATIONS = ["El Segundo", "Santa Monica", "Culver", "Echo"]
+
     def __init__(self, base_url: str = "", save_screenshots: bool = False):
         self.base_url = base_url
         self.save_screenshots = save_screenshots
@@ -335,7 +338,6 @@ class IClassPro:
         """Scrape all available classes from the portal, iterating over each day."""
         discovered = []
         seen_urls = set()
-        known_locations = ["El Segundo", "Santa Monica", "Culver", "Echo"]
         days = [
             "Sunday",
             "Monday",
@@ -402,7 +404,7 @@ class IClassPro:
                             name = candidate
 
                         # Match known locations in parent text
-                        for loc in known_locations:
+                        for loc in self.KNOWN_LOCATIONS:
                             if loc.lower() in parent_text.lower():
                                 location = loc
                                 break
@@ -591,7 +593,7 @@ def main():
             driver.login(email=args.email, password=args.password)
             classes = driver.scrape_classes(student_id=args.student_id)
             # Emit a single parseable line that the web UI will detect
-            print(f"CLASSES_JSON:{json.dumps(classes)}")
+            print(f"CLASSES_JSON:{json.dumps(classes)}", flush=True)
             logging.info("All operations completed.")
 
         elif args.enroll_urls:
