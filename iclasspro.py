@@ -361,6 +361,7 @@ class IClassPro:
         student_id: int,
         days_filter: list = None,
         locations_filter: list = None,
+        deep_scrape: bool = False,
     ) -> list:
         """Scrape available classes from the portal, iterating over each day.
 
@@ -371,6 +372,8 @@ class IClassPro:
                 scraped.
             locations_filter: Optional list of location strings (e.g. ["Culver",
                 "El Segundo"]) to keep.  When None or empty, all locations are kept.
+            deep_scrape: If True, open each class in a new tab to extract the actual
+                deep-link URL and instructor name, then close the tab.
         """
         discovered = []
         # Deduplicate by (day, time, name) rather than by href/URL, because
@@ -556,6 +559,66 @@ class IClassPro:
                     logger.debug(f"Error processing anchor: {e}")
 
         logger.info(f"Discovery complete. Found {len(discovered)} class(es).")
+
+        # --- Deep scrape phase: extract actual URLs and instructor info ---
+        if deep_scrape and discovered:
+            logger.info(
+                "Starting deep-scrape phase to extract instructor info and verify URLs..."
+            )
+            for idx, cls in enumerate(discovered):
+                try:
+                    class_name = cls.get("name", "Unknown")
+                    logger.info(
+                        f"Deep-scraping class {idx + 1}/{len(discovered)}: {class_name}"
+                    )
+
+                    # Open the class details page in a new tab using Ctrl+click
+                    with self.page.expect_popup() as popup_info:
+                        self.page.locator(f"a:has-text('{class_name}')").click(
+                            modifiers=["Control"]
+                        )
+
+                    detail_page = popup_info.value
+                    detail_page.wait_for_load_state("load")
+                    self.page.wait_for_timeout(2000)
+
+                    # Extract the actual deep-link URL
+                    deep_url = detail_page.url
+                    cls["url"] = deep_url
+                    logger.info(f"  Extracted URL: {deep_url}")
+
+                    # Extract instructor name from the detail page
+                    try:
+                        # Look for text containing "Instructor:" and get the following text node
+                        instructor_elem = detail_page.locator(
+                            "text=/Instructor:/i"
+                        ).first
+                        if instructor_elem.is_visible(timeout=5000):
+                            instructor_text = instructor_elem.text_content() or ""
+                            # Remove "Instructor:" prefix and clean up
+                            instructor_name = instructor_text.replace(
+                                "Instructor:", ""
+                            ).strip()
+                            cls["instructor"] = instructor_name or ""
+                            logger.info(f"  Extracted instructor: {instructor_name}")
+                        else:
+                            cls["instructor"] = ""
+                            logger.debug("  Instructor field not found")
+                    except Exception as e:
+                        cls["instructor"] = ""
+                        logger.debug(f"  Could not extract instructor: {e}")
+
+                    detail_page.close()
+                except Exception as e:
+                    logger.warning(f"Failed to deep-scrape class {idx}: {e}")
+                    # Ensure tab is closed even if error occurred
+                    try:
+                        detail_page.close()
+                    except Exception:
+                        pass
+
+            logger.info("Deep-scrape phase complete.")
+
         return discovered
 
     def enroll_by_url(self, url: str, class_index: int) -> None:
@@ -628,6 +691,12 @@ def main():
             "Comma-separated list of locations to include during scrape "
             "(e.g. 'Culver,El Segundo').  Empty means all locations."
         ),
+    )
+    parser.add_argument(
+        "--deep-scrape",
+        action="store_true",
+        default=False,
+        help="Extract detailed URLs and instructor info for each discovered class (slower).",
     )
     parser.add_argument(
         "--schedule",
@@ -727,6 +796,7 @@ def main():
                 student_id=args.student_id,
                 days_filter=days_filter or None,
                 locations_filter=locations_filter or None,
+                deep_scrape=args.deep_scrape,
             )
             # Emit a single parseable line that the web UI will detect
             print(f"CLASSES_JSON:{json.dumps(classes)}", flush=True)
