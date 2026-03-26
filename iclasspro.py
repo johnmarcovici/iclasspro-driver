@@ -67,12 +67,12 @@ def send_log_email(
                 "<tr><th>Day</th><th>Time</th><th>Location</th><th>Status</th><th>Error</th></tr>"
             )
             for item in summary_data:
-                cls = item.get("class", {})
+                cls = {k.lower(): v for k, v in item.get("class", {}).items()}
                 status = item.get("status", "Unknown")
                 error = item.get("error", "")
-                day = cls.get("day") or cls.get("Day", "")
-                time_str = cls.get("time") or cls.get("Time", "")
-                location = cls.get("location") or cls.get("Location", "")
+                day = cls.get("day", "")
+                time_str = cls.get("time", "")
+                location = cls.get("location", "")
                 text_content += f"- {day} {time_str} at {location}: {status} {error}\n"
                 html_content += f"<tr><td>{day}</td><td>{time_str}</td><td>{location}</td><td>{status}</td><td>{error}</td></tr>"
 
