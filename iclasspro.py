@@ -8,6 +8,7 @@ import re
 import smtplib
 import time
 import pandas as pd
+import yaml
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse, urljoin
@@ -97,9 +98,19 @@ def send_log_email(
 # --- Main Class ---
 
 
+def _load_locations() -> list:
+    """Load the known locations list from config/locations.yaml."""
+    config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f).get("locations", [])
+    except Exception:
+        return ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"]
+
+
 class IClassPro:
     # Known location names used for both UI dropdowns and class-name extraction.
-    KNOWN_LOCATIONS = ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"]
+    KNOWN_LOCATIONS = _load_locations()
 
     def __init__(self, base_url: str = "", save_screenshots: bool = False):
         self.base_url = base_url

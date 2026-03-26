@@ -273,11 +273,9 @@
                     <div>
                         <strong>Locations</strong>
                         <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="El Segundo"> El Segundo</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Santa Monica"> Santa Monica</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Culver"> Culver</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Echo"> Echo</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="VNSO"> VNSO</label>
+                            {% for loc in locations %}
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="{{ loc }}"> {{ loc }}</label>
+                            {% endfor %}
                         </div>
                     </div>
                 </div>
@@ -453,7 +451,7 @@
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
             // Location
-            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"];
+            const predefinedLocs = {{ locations | tojson }};
             let isCustomLoc = loc && !predefinedLocs.includes(loc);
             let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
             if (isCustomLoc) {

@@ -4,6 +4,7 @@ import os
 import sys
 from typing import List, Dict
 
+import yaml
 from dotenv import load_dotenv, set_key, find_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
@@ -34,6 +35,16 @@ os.makedirs("schedules/tmp", exist_ok=True)
 templates = Jinja2Templates(directory="templates")
 
 
+def _load_locations() -> list:
+    """Load the known locations list from config/locations.yaml."""
+    config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f).get("locations", [])
+    except Exception:
+        return []
+
+
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     context = {
@@ -44,6 +55,7 @@ async def get(request: Request):
         "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
         "initial_schedule": [],
         "default_schedule_filename": None,
+        "locations": _load_locations(),
     }
 
     # Try to load the default schedule from .env to pre-populate the grid
