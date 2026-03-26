@@ -11,7 +11,7 @@ import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, urljoin, quote
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -410,59 +410,102 @@ class IClassPro:
             self.page.wait_for_timeout(1000)
             self.take_screenshot(f"scrape_{day_name.lower()}.png", full_page=True)
 
-            # Strategy: target only anchors whose href already contains the
-            # class-details path (e.g. "View Available Dates" links). These
-            # carry the class ID directly in their href while the outer card
-            # wrapper anchors typically have href="/scaq" (SPA root) due to
-            # JS-based router navigation.  For each such anchor we traverse
-            # the DOM upward to find the card heading that has the class name
-            # and time string.
-            all_anchors = self.page.locator("a[href*='class-details']").all()
+            # Strategy: iterate every anchor on the page and keep only those
+            # whose text contains a time pattern (e.g. "at 10:30am").  These
+            # are the card-wrapper anchors that carry the class name/time in
+            # their text_content().  They typically have href="/scaq" (SPA
+            # root) so the class ID cannot be read from their own href.
+            # Instead, for each such anchor we search the nearest parent
+            # container (walking up the DOM) for a sibling "View Available
+            # Dates" link whose href does contain the class-details path.
+            all_anchors = self.page.locator("a").all()
             for anchor in all_anchors:
                 try:
+                    text = (anchor.text_content() or "").strip()
                     href = anchor.get_attribute("href") or ""
 
-                    class_id_match = re.search(r'class-details/(\d+)', href)
+                    # Only process links whose text contains a time pattern
+                    time_match = _TIME_RE.search(text)
+                    if not time_match or not href:
+                        continue
+
+                    # Skip bare "at TIME" links (navigation/filter anchors).
+                    # Real class-card links always have content before the time.
+                    text_prefix = _TIME_RE.sub("", text).strip()
+                    if not text_prefix:
+                        continue
+
+                    # --- Build the class detail URL ---
+                    # First check if this anchor's own href already has the ID.
+                    # If not, traverse upward in the DOM to find a sibling
+                    # "class-details" link that carries the numeric class ID.
+                    class_id_match = re.search(r'/class-details/(\d+)', href)
                     if not class_id_match:
-                        continue
-
-                    class_id = class_id_match.group(1)
-                    filters_json = json.dumps(
-                        {"students": str(student_id), "days": str(day_idx)}
-                    )
-                    class_url = (
-                        f"{self.base_url.rstrip('/')}/class-details/{class_id}"
-                        f"?selectedStudents={student_id}&filters={quote(filters_json)}"
-                    )
-
-                    # Traverse the DOM upward from this anchor to find the
-                    # nearest heading element that contains a time pattern
-                    # (e.g. "Culver:Sunday 03/29 at 10:30am - Long Course").
-                    name = anchor.evaluate(r"""el => {
-                        let node = el.parentElement;
-                        while (node && node.tagName !== 'BODY') {
-                            const candidates = node.querySelectorAll(
-                                'h1,h2,h3,h4,h5,h6,strong,b'
-                            );
-                            for (const c of candidates) {
-                                const txt = c.textContent.trim();
-                                if (/\bat\b/i.test(txt) && /\d{1,2}:\d{2}\s*(?:am|pm)/i.test(txt)) {
-                                    return txt;
+                        details_href = anchor.evaluate(r"""el => {
+                            let node = el.parentElement;
+                            while (node && node.tagName !== 'BODY') {
+                                const links = node.querySelectorAll(
+                                    "a[href*='class-details']"
+                                );
+                                for (const lnk of links) {
+                                    const h = lnk.getAttribute('href') || '';
+                                    if (/\/class-details\/\d+/.test(h)) return h;
                                 }
+                                node = node.parentElement;
                             }
-                            node = node.parentElement;
-                        }
-                        return '';
-                    }""")
+                            return '';
+                        }""")
+                        class_id_match = re.search(
+                            r'/class-details/(\d+)', details_href
+                        )
 
-                    if not name:
-                        continue
-
-                    time_match = _TIME_RE.search(name)
-                    if not time_match:
-                        continue
+                    if class_id_match:
+                        filters_json = json.dumps(
+                            {"students": str(student_id), "days": str(day_idx)}
+                        )
+                        class_url = (
+                            f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
+                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                        )
+                    elif href.startswith("http"):
+                        class_url = href
+                    else:
+                        class_url = urljoin(self.base_url, href)
 
                     time_str = time_match.group(1)
+
+                    # --- Extract the class title (name) ---
+                    # The card anchor's text_content() includes the full card:
+                    #   "Location:Day MM/DD at TIME - CourseType Day|HH:MM AM – HH:MM AM
+                    #    View Available Dates SMTWTFS44 Open"
+                    # Primary: look for a heading-like element inside the anchor.
+                    # Fallback: split on the "DayAbbr|" metadata separator or keywords.
+                    name = ""
+                    try:
+                        heading_el = anchor.locator(
+                            "h1, h2, h3, h4, h5, h6, strong, b"
+                        ).first
+                        candidate = (heading_el.text_content() or "").strip()
+                        if candidate and _TIME_RE.search(candidate):
+                            name = candidate
+                    except Exception:
+                        pass
+
+                    if not name:
+                        for split_pat in (
+                            r'\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\|',
+                            r'\s+(?:Available\b|View\b)',
+                        ):
+                            parts = re.split(
+                                split_pat, text, maxsplit=1, flags=re.IGNORECASE
+                            )
+                            if len(parts) > 1:
+                                name = parts[0].strip()
+                                break
+
+                    if not name:
+                        name = text_prefix or text
+
                     location = ""
 
                     # --- Location extraction ---
@@ -484,8 +527,7 @@ class IClassPro:
                     if locations_filter_norm and location.lower() not in locations_filter_norm:
                         continue
 
-                    # Deduplicate: a class may have several class-details links
-                    # on the same card (e.g. multiple CTA buttons).
+                    # Deduplicate by (day, time, name)
                     dedup_key = (day_name, time_str, name)
                     if dedup_key in seen_keys:
                         continue
