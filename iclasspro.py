@@ -269,35 +269,13 @@ class IClassPro:
         class_index: int,
     ) -> None:
         """Finds and adds a single class to the cart."""
-        logger.info(f"Searching for class: {daystr} at {timestr} in {location}")
-        day_index = DAY_TO_QUERY_INDEX.get(daystr.strip().lower())
-        if day_index is None:
-            valid_days = ", ".join(WEEK_DAYS)
-            raise ValueError(f"Invalid day '{daystr}'. Expected one of: {valid_days}")
-
-        day_query = f"&days={day_index}"
-        student_query = f"&selectedStudents={student_id}"
-        booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
-
-        self.page.goto(booking_url, wait_until="load")
-        self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
-
-        # Find the link for the class time, waiting for it to appear
-        class_link = self.page.locator(f"a:has-text('at {timestr}')")
-        try:
-            # Wait for at least one to be visible
-            class_link.first.wait_for(state="visible", timeout=20000)
-
-            # If there are multiple (e.g., this week and next week), pick the last one
-            count = class_link.count()
-            logger.info(
-                f"Found {count} class link(s) for {timestr}. Clicking the latest one to enroll."
-            )
-            class_link.last.click()
-        except Exception:
-            raise RuntimeError(
-                f"Could not find class at {timestr} within the time limit."
-            )
+        self._open_class_detail_page(
+            location=location,
+            timestr=timestr,
+            daystr=daystr,
+            student_id=student_id,
+            class_index=class_index,
+        )
 
         # Wait for the "Enroll Now" button to be ready and click it
         enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
@@ -320,6 +298,150 @@ class IClassPro:
             raise RuntimeError("Failed to verify that the class was added to the cart.")
 
         self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
+
+    def _open_class_detail_page(
+        self,
+        location: str,
+        timestr: str,
+        daystr: str,
+        student_id: int,
+        class_index: int,
+    ) -> None:
+        """Navigate to the class search results and click through to the class detail page."""
+        logger.info(f"Searching for class: {daystr} at {timestr} in {location}")
+        day_index = DAY_TO_QUERY_INDEX.get(daystr.strip().lower())
+        if day_index is None:
+            valid_days = ", ".join(WEEK_DAYS)
+            raise ValueError(f"Invalid day '{daystr}'. Expected one of: {valid_days}")
+
+        day_query = f"&days={day_index}"
+        student_query = f"&selectedStudents={student_id}"
+        booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
+
+        self.page.goto(booking_url, wait_until="load")
+        self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
+
+        # Find the link for the class time, waiting for it to appear
+        class_link = self.page.locator(f"a:has-text('at {timestr}')")
+        try:
+            # Wait for at least one to be visible
+            class_link.first.wait_for(state="visible", timeout=20000)
+
+            # If there are multiple (e.g., this week and next week), pick the last one
+            count = class_link.count()
+            logger.info(
+                f"Found {count} class link(s) for {timestr}. Clicking the latest one to open details."
+            )
+            class_link.last.click()
+            self.page.wait_for_load_state("load")
+            self.page.wait_for_timeout(1000)
+        except Exception:
+            raise RuntimeError(
+                f"Could not find class at {timestr} within the time limit."
+            )
+
+    def _extract_detail_field(self, label: str) -> str:
+        """Extract a labeled field value from the class detail page."""
+        script = """
+        ([labelText]) => {
+            const normalized = (value) => (value || '').replace(/\s+/g, ' ').trim();
+            const labelPrefix = `${labelText.toLowerCase()}:`;
+            const readFollowingText = (elements) => {
+                for (const element of elements) {
+                    const text = normalized(element?.textContent);
+                    if (text) {
+                        return text;
+                    }
+                }
+                return '';
+            };
+
+            const elements = Array.from(document.querySelectorAll('body *'));
+            for (const el of elements) {
+                const elementText = normalized(el.textContent);
+                const elementTextLower = elementText.toLowerCase();
+                if (!elementTextLower.startsWith(labelPrefix)) {
+                    continue;
+                }
+
+                const inlineValue = elementText.slice(labelText.length + 1).trim();
+                if (inlineValue) {
+                    return inlineValue;
+                }
+
+                let sibling = el.nextElementSibling;
+                while (sibling) {
+                    const text = normalized(sibling.textContent);
+                    if (text) {
+                        return text;
+                    }
+                    sibling = sibling.nextElementSibling;
+                }
+
+                const parent = el.parentElement;
+                if (!parent) {
+                    continue;
+                }
+
+                const children = Array.from(parent.children);
+                const index = children.indexOf(el);
+                for (let i = index + 1; i < children.length; i += 1) {
+                    const text = normalized(children[i].textContent);
+                    if (text) {
+                        return text;
+                    }
+                }
+
+                let container = parent;
+                while (container) {
+                    const containerChildren = Array.from(container.children);
+                    const containerIndex = containerChildren.indexOf(parent);
+                    if (containerIndex >= 0) {
+                        const siblingText = readFollowingText(
+                            containerChildren.slice(containerIndex + 1)
+                        );
+                        if (siblingText) {
+                            return siblingText;
+                        }
+                    }
+
+                    const row = container.closest('.row, [class*="row"]');
+                    if (row) {
+                        const rowChildren = Array.from(row.children);
+                        const rowIndex = rowChildren.indexOf(container);
+                        if (rowIndex >= 0) {
+                            const rowText = readFollowingText(
+                                rowChildren.slice(rowIndex + 1)
+                            );
+                            if (rowText) {
+                                return rowText;
+                            }
+                        }
+                    }
+
+                    container = container.parentElement;
+                }
+
+                const parentText = normalized(parent.textContent);
+                if (parentText.toLowerCase().startsWith(labelPrefix)) {
+                    const inlineParentValue = parentText.slice(labelText.length + 1).trim();
+                    if (inlineParentValue) {
+                        return inlineParentValue;
+                    }
+                }
+            }
+
+            return '';
+        }
+        """
+        try:
+            self.page.locator(f"text=/^{label}:/i").first.wait_for(
+                state="attached", timeout=5000
+            )
+            return (self.page.evaluate(script, [label]) or "").strip()
+        except Exception as error:
+            logger.debug(f"Could not extract detail field '{label}': {error}")
+            return ""
 
     def process_cart(
         self, promo_code: str = "", complete_transaction: bool = False
@@ -563,7 +685,7 @@ class IClassPro:
         # --- Deep scrape phase: extract actual URLs and instructor info ---
         if deep_scrape and discovered:
             logger.info(
-                "Starting deep-scrape phase to extract instructor info and verify URLs..."
+                "Starting deep-scrape phase using the enrollment click-through flow..."
             )
             for idx, cls in enumerate(discovered):
                 try:
@@ -572,50 +694,26 @@ class IClassPro:
                         f"Deep-scraping class {idx + 1}/{len(discovered)}: {class_name}"
                     )
 
-                    # Open the class details page in a new tab using Ctrl+click
-                    with self.page.expect_popup() as popup_info:
-                        self.page.locator(f"a:has-text('{class_name}')").click(
-                            modifiers=["Control"]
-                        )
+                    self._open_class_detail_page(
+                        location=cls.get("Location") or cls.get("location", ""),
+                        timestr=cls.get("Time") or cls.get("time", ""),
+                        daystr=cls.get("Day") or cls.get("day", ""),
+                        student_id=student_id,
+                        class_index=idx,
+                    )
 
-                    detail_page = popup_info.value
-                    detail_page.wait_for_load_state("load")
-                    self.page.wait_for_timeout(2000)
-
-                    # Extract the actual deep-link URL
-                    deep_url = detail_page.url
+                    deep_url = self.page.url
                     cls["url"] = deep_url
                     logger.info(f"  Extracted URL: {deep_url}")
 
-                    # Extract instructor name from the detail page
-                    try:
-                        # Look for text containing "Instructor:" and get the following text node
-                        instructor_elem = detail_page.locator(
-                            "text=/Instructor:/i"
-                        ).first
-                        if instructor_elem.is_visible(timeout=5000):
-                            instructor_text = instructor_elem.text_content() or ""
-                            # Remove "Instructor:" prefix and clean up
-                            instructor_name = instructor_text.replace(
-                                "Instructor:", ""
-                            ).strip()
-                            cls["instructor"] = instructor_name or ""
-                            logger.info(f"  Extracted instructor: {instructor_name}")
-                        else:
-                            cls["instructor"] = ""
-                            logger.debug("  Instructor field not found")
-                    except Exception as e:
-                        cls["instructor"] = ""
-                        logger.debug(f"  Could not extract instructor: {e}")
-
-                    detail_page.close()
+                    instructor_name = self._extract_detail_field("Instructor")
+                    cls["instructor"] = instructor_name
+                    if instructor_name:
+                        logger.info(f"  Extracted instructor: {instructor_name}")
+                    else:
+                        logger.debug("  Instructor field not found")
                 except Exception as e:
                     logger.warning(f"Failed to deep-scrape class {idx}: {e}")
-                    # Ensure tab is closed even if error occurred
-                    try:
-                        detail_page.close()
-                    except Exception:
-                        pass
 
             logger.info("Deep-scrape phase complete.")
 
