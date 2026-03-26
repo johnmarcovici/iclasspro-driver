@@ -240,7 +240,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
             return
 
         # Save selected classes to a temporary file
-        tmp_path = "schedules/tmp/discovered_schedule.json"
+        tmp_path = "schedules/tmp/schedule.json"
         with open(tmp_path, "w") as f:
             json.dump(selected_classes, f, indent=4)
 
@@ -254,7 +254,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
             password,
             "--student-id",
             str(student_id),
-            "--enroll-urls",
+            "--schedule",
             tmp_path,
         ]
 
@@ -338,7 +338,7 @@ async def websocket_endpoint(websocket: WebSocket):
             return
 
         # Save the schedule to a temporary file
-        tmp_schedule_path = "schedules/tmp/web_schedule.json"
+        tmp_schedule_path = "schedules/tmp/schedule.json"
         with open(tmp_schedule_path, "w") as f:
             json.dump(schedule, f, indent=4)
 

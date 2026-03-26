@@ -630,12 +630,6 @@ def main():
         ),
     )
     parser.add_argument(
-        "--enroll-urls",
-        type=str,
-        default=None,
-        help="Path to JSON file with URL-based class list for enrollment.",
-    )
-    parser.add_argument(
         "--schedule",
         type=str,
         default=os.getenv("ICLASS_SCHEDULE", "schedules/schedule.json"),
@@ -739,8 +733,8 @@ def main():
             logger.info("All operations completed.")
 
         else:
-            # --- Enrollment mode (from URL list or schedule file) ---
-            schedule_path = args.enroll_urls or args.schedule
+            # --- Enrollment mode ---
+            schedule_path = args.schedule
             logger.info(f"Mode: enrollment, schedule: {schedule_path}")
             with open(schedule_path, "r") as f:
                 schedule = json.load(f)
@@ -764,9 +758,10 @@ def main():
                 )
                 try:
                     driver.enroll(
-                        location=class_info.get("Location", ""),
-                        timestr=class_info.get("Time", ""),
-                        daystr=class_info.get("Day", ""),
+                        location=class_info.get("Location")
+                        or class_info.get("location", ""),
+                        timestr=class_info.get("Time") or class_info.get("time", ""),
+                        daystr=class_info.get("Day") or class_info.get("day", ""),
                         student_id=args.student_id,
                         class_index=i,
                     )

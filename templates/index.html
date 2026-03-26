@@ -798,12 +798,15 @@
                 const nameCell = isRealUrl
                     ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(cls.name || '—') + '</a>'
                     : escapeHtml(cls.name || '—');
+                const day = cls.day || cls.Day || '—';
+                const time = cls.time || cls.Time || '—';
+                const location = cls.location || cls.Location || '—';
                 tr.innerHTML =
                     '<td><input type="checkbox" class="class-checkbox" data-index="' + idx + '" checked></td>' +
                     '<td>' + nameCell + '</td>' +
-                    '<td>' + escapeHtml(cls.day || '—') + '</td>' +
-                    '<td>' + escapeHtml(cls.time || '—') + '</td>' +
-                    '<td>' + escapeHtml(cls.location || '—') + '</td>';
+                    '<td>' + escapeHtml(day) + '</td>' +
+                    '<td>' + escapeHtml(time) + '</td>' +
+                    '<td>' + escapeHtml(location) + '</td>';
                 tbody.appendChild(tr);
             });
             document.getElementById('discovered-section').style.display = 'block';
