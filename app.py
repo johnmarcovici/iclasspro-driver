@@ -224,6 +224,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
         password = config.get("password", "")
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
+        complete_transaction = config.get("complete_transaction", True)
         selected_classes = config.get("selected_classes", [])
 
         if not all([email, password, student_id]):
@@ -259,6 +260,9 @@ async def websocket_enroll_selected(websocket: WebSocket):
 
         if promo_code:
             cmd_args.extend(["--promo-code", promo_code])
+
+        if complete_transaction:
+            cmd_args.append("--complete-transaction")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -316,6 +320,7 @@ async def websocket_endpoint(websocket: WebSocket):
         password = config.get("password", "")
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
+        complete_transaction = config.get("complete_transaction", True)
         schedule = config.get("schedule", [])
 
         if not all([email, password, student_id]):
@@ -355,6 +360,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
         if promo_code:
             cmd_args.extend(["--promo-code", promo_code])
+
+        if complete_transaction:
+            cmd_args.append("--complete-transaction")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,

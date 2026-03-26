@@ -12,9 +12,10 @@
             padding: 1rem;
             border-radius: 5px;
             height: 400px;
+            overflow-x: auto;
             overflow-y: auto;
             font-family: monospace;
-            white-space: pre-wrap;
+            white-space: pre;
             margin-top: 1rem;
         }
         .status-idle { color: #6c757d; }
@@ -144,9 +145,10 @@
             padding: 1rem;
             border-radius: 5px;
             height: 250px;
+            overflow-x: auto;
             overflow-y: auto;
             font-family: monospace;
-            white-space: pre-wrap;
+            white-space: pre;
             margin-top: 0.5rem;
         }
     </style>
@@ -194,6 +196,10 @@
                         <input type="text" id="promo_code" value="{{ promo_code }}">
                     </label>
                 </div>
+                <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
+                    <input type="checkbox" id="complete_transaction" checked style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
+                    Complete Transaction (uncheck to test enrollment without finalising the purchase)
+                </label>
             </details>
         </div><!-- end #tab-config -->
 
@@ -602,6 +608,7 @@
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
+            const complete_transaction = document.getElementById("complete_transaction").checked;
             const schedule = getScheduleData();
 
             // Silently update the .env file with the last run schedule
@@ -643,6 +650,7 @@
                     password: password,
                     student_id: student_id,
                     promo_code: promo_code,
+                    complete_transaction: complete_transaction,
                     schedule: schedule
                 }));
             };
@@ -820,6 +828,7 @@
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
+            const complete_transaction = document.getElementById("complete_transaction").checked;
 
             if (!email || !password || !student_id) {
                 alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
@@ -859,6 +868,7 @@
                     password: password,
                     student_id: student_id,
                     promo_code: promo_code,
+                    complete_transaction: complete_transaction,
                     selected_classes: selected
                 }));
             };
