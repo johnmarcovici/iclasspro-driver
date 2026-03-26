@@ -11,7 +11,7 @@ import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, quote
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -104,11 +104,8 @@ def send_log_email(
 def _load_locations() -> list:
     """Load the known locations list from config/locations.yaml."""
     config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f).get("locations", [])
-    except Exception:
-        return ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"]
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f).get("locations", [])
 
 
 class IClassPro:
@@ -434,19 +431,61 @@ class IClassPro:
                     if not text_prefix:
                         continue
 
-                    # Build absolute URL (best-effort; may be a fragment URL like
-                    # "https://…/#" when the card uses JS navigation)
-                    if href.startswith("http"):
+                    # --- Build the class detail URL ---
+                    # The portal URL format is:
+                    #   {base}/class-details/{id}?selectedStudents={sid}&filters={json}
+                    # Extract the class ID from the href and construct the full URL
+                    # (including the selectedStudents + filters params the portal expects).
+                    class_id_match = re.search(r'/class-details/(\d+)', href)
+                    if class_id_match:
+                        filters_json = json.dumps(
+                            {"students": str(student_id), "days": str(day_idx)}
+                        )
+                        class_url = (
+                            f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
+                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                        )
+                    elif href.startswith("http"):
                         class_url = href
                     else:
                         class_url = urljoin(self.base_url, href)
 
-                    # Use the anchor text itself as the class name.  Both name and
-                    # time_str are derived from the same source so they can never
-                    # be mismatched (the previous parent-heading approach could stamp
-                    # the wrong heading onto unrelated time-only links).
                     time_str = time_match.group(1)
-                    name = text
+
+                    # --- Extract the class title (name) ---
+                    # The card anchor's text_content() includes the full card:
+                    #   "Location:Day MM/DD at TIME - CourseType Day|HH:MM AM – HH:MM AM
+                    #    View Available Dates SMTWTFS44 Open"
+                    # Primary: look for a heading-like element inside the anchor.
+                    # Fallback: split on the "DayAbbr|" metadata separator or keywords.
+                    name = ""
+                    try:
+                        heading_el = anchor.locator(
+                            "h1, h2, h3, h4, h5, h6, strong, b"
+                        ).first
+                        candidate = (heading_el.text_content() or "").strip()
+                        if candidate and _TIME_RE.search(candidate):
+                            name = candidate
+                    except Exception:
+                        pass
+
+                    if not name:
+                        # Split at the first "DayAbbr|" token (e.g. "Sun|") which marks
+                        # the scheduled-time display row, or at "Available"/"View" keywords.
+                        for split_pat in (
+                            r'\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\|',
+                            r'\s+(?:Available\b|View\b)',
+                        ):
+                            parts = re.split(
+                                split_pat, text, maxsplit=1, flags=re.IGNORECASE
+                            )
+                            if len(parts) > 1:
+                                name = parts[0].strip()
+                                break
+
+                    if not name:
+                        name = text_prefix or text
+
                     location = ""
 
                     # --- Location extraction ---

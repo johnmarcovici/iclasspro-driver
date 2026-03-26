@@ -38,11 +38,8 @@ templates = Jinja2Templates(directory="templates")
 def _load_locations() -> list:
     """Load the known locations list from config/locations.yaml."""
     config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f).get("locations", [])
-    except Exception:
-        return []
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f).get("locations", [])
 
 
 @app.get("/", response_class=HTMLResponse)
