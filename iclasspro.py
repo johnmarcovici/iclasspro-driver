@@ -334,14 +334,28 @@ class IClassPro:
 
         logging.info("Cart processing complete.")
 
-    def scrape_classes(self, student_id: int) -> list:
-        """Scrape all available classes from the portal, iterating over each day."""
+    def scrape_classes(
+        self,
+        student_id: int,
+        days_filter: list = None,
+        locations_filter: list = None,
+    ) -> list:
+        """Scrape available classes from the portal, iterating over each day.
+
+        Args:
+            student_id: Portal student ID.
+            days_filter: Optional list of day names (e.g. ["Sunday", "Monday"]) to
+                limit which days are fetched.  When None or empty, all 7 days are
+                scraped.
+            locations_filter: Optional list of location strings (e.g. ["Culver",
+                "El Segundo"]) to keep.  When None or empty, all locations are kept.
+        """
         discovered = []
         # Deduplicate by (day, time, name) rather than by href/URL, because
         # JS-navigated class cards often share a placeholder href (e.g. "#") which
         # would cause every class after the first to be dropped as a "duplicate".
         seen_keys = set()
-        days = [
+        all_days = [
             "Sunday",
             "Monday",
             "Tuesday",
@@ -351,7 +365,31 @@ class IClassPro:
             "Saturday",
         ]
 
-        for day_idx, day_name in enumerate(days, start=1):
+        # Normalise filter lists so comparisons are case-insensitive
+        days_filter_norm = (
+            [d.strip().lower() for d in days_filter if d.strip()]
+            if days_filter
+            else []
+        )
+        locations_filter_norm = (
+            [l.strip().lower() for l in locations_filter if l.strip()]
+            if locations_filter
+            else []
+        )
+
+        days_to_scrape = [
+            (idx, name)
+            for idx, name in enumerate(all_days, start=1)
+            if not days_filter_norm or name.lower() in days_filter_norm
+        ]
+        if days_filter_norm:
+            logging.info(
+                f"Day filter active: scraping {[n for _, n in days_to_scrape]}"
+            )
+        if locations_filter_norm:
+            logging.info(f"Location filter active: keeping {locations_filter_norm}")
+
+        for day_idx, day_name in days_to_scrape:
             logging.info(f"Scraping classes for {day_name}...")
             url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
             self.page.goto(url, wait_until="load")
@@ -386,6 +424,7 @@ class IClassPro:
                     # Try to extract class name and location from parent container
                     name = ""
                     location = ""
+                    parent_text = ""
                     try:
                         # Walk up to the nearest card/list-item/article ancestor
                         parent = anchor.locator(
@@ -403,7 +442,7 @@ class IClassPro:
                             "h1, h2, h3, h4, h5, h6, strong"
                         ).first
                         candidate = (heading_el.text_content() or "").strip()
-                        if candidate and "at " not in candidate.lower():
+                        if candidate:
                             name = candidate
                     except Exception:
                         pass
@@ -418,25 +457,38 @@ class IClassPro:
                         ).strip()
                         name = name_part if name_part else text
 
-                    # Extract location: prefer the class name itself (e.g. "Culver:Sunday 03/29"),
-                    # then fall back to the anchor link text, then the broader parent text.
-                    # Checking the name first avoids false positives from nav/sidebar text that
-                    # may list multiple locations (causing the wrong location to be matched).
-                    for search_text in [name, text]:
+                    # --- Location extraction ---
+                    # Card headings follow the pattern "Location:Day Date at Time - Type"
+                    # (e.g. "Culver:Sunday 03/29 at 10:30am - Long Course").  Extract the
+                    # prefix before the first colon as the primary location signal; it
+                    # avoids false positives from nav/sidebar text that lists all locations.
+                    colon_idx = name.find(":")
+                    if colon_idx > 0:
+                        prefix = name[:colon_idx].strip()
+                        # Accept the prefix only if it matches a known location
                         for loc in self.KNOWN_LOCATIONS:
-                            if loc.lower() in search_text.lower():
+                            if loc.lower() == prefix.lower() or loc.lower() in prefix.lower():
                                 location = loc
                                 break
-                        if location:
-                            break
+
+                    # Fallback: substring search in name → anchor text → parent card text
                     if not location:
-                        try:
+                        for search_text in [name, text]:
                             for loc in self.KNOWN_LOCATIONS:
-                                if loc.lower() in parent_text.lower():
+                                if loc.lower() in search_text.lower():
                                     location = loc
                                     break
-                        except Exception:
-                            pass
+                            if location:
+                                break
+                    if not location and parent_text:
+                        for loc in self.KNOWN_LOCATIONS:
+                            if loc.lower() in parent_text.lower():
+                                location = loc
+                                break
+
+                    # Apply location filter (if requested)
+                    if locations_filter_norm and location.lower() not in locations_filter_norm:
+                        continue
 
                     # Deduplicate by (day, time, name) — robust against JS-navigated cards
                     # that share a placeholder href (e.g. "#").
@@ -516,6 +568,24 @@ def main():
         action="store_true",
         default=False,
         help="Scrape available classes and print as JSON instead of enrolling.",
+    )
+    parser.add_argument(
+        "--scrape-days",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated list of days to include during scrape "
+            "(e.g. 'Sunday,Monday').  Empty means all days."
+        ),
+    )
+    parser.add_argument(
+        "--scrape-locations",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated list of locations to include during scrape "
+            "(e.g. 'Culver,El Segundo').  Empty means all locations."
+        ),
     )
     parser.add_argument(
         "--enroll-urls",
@@ -613,9 +683,15 @@ def main():
         if args.scrape:
             # --- Scrape mode: discover available classes and emit JSON ---
             logging.info("Mode: scrape available classes")
+            days_filter = [d.strip() for d in args.scrape_days.split(",") if d.strip()]
+            locations_filter = [l.strip() for l in args.scrape_locations.split(",") if l.strip()]
             driver.webdriver()
             driver.login(email=args.email, password=args.password)
-            classes = driver.scrape_classes(student_id=args.student_id)
+            classes = driver.scrape_classes(
+                student_id=args.student_id,
+                days_filter=days_filter or None,
+                locations_filter=locations_filter or None,
+            )
             # Emit a single parseable line that the web UI will detect
             print(f"CLASSES_JSON:{json.dumps(classes)}", flush=True)
             logging.info("All operations completed.")
@@ -643,7 +719,7 @@ def main():
                     f"--- Processing class {i+1}/{len(url_schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
                 try:
-                    driver.book_class(
+                    driver.enroll(
                         location=class_info.get("location", ""),
                         timestr=class_info.get("time", ""),
                         daystr=class_info.get("day", ""),

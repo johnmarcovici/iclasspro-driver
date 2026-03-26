@@ -254,8 +254,36 @@
         <!-- ===== TAB 3: Discover & Enroll ===== -->
         <div id="tab-discover" class="tab-panel">
 
-            <!-- Discovery controls -->
+            <!-- Discovery filters -->
             <section style="margin-top:0;">
+                <h4 style="margin-bottom:0.5rem;">Filters <span style="font-weight:normal;font-size:0.85em;color:#888;">(leave all unchecked to scrape everything)</span></h4>
+                <div style="display:flex; gap:2rem; flex-wrap:wrap;">
+                    <div>
+                        <strong>Days</strong>
+                        <div id="scrape-days-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Sunday"> Sun</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Monday"> Mon</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Tuesday"> Tue</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Wednesday"> Wed</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Thursday"> Thu</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Friday"> Fri</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Saturday"> Sat</label>
+                        </div>
+                    </div>
+                    <div>
+                        <strong>Locations</strong>
+                        <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="El Segundo"> El Segundo</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Santa Monica"> Santa Monica</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Culver"> Culver</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Echo"> Echo</label>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Discovery controls -->
+            <section>
                 <div style="display: flex; gap: 1rem; align-items: center;">
                     <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0;">🔍 Discover Available Classes</button>
                     <button id="stop-discover-button" class="secondary outline" onclick="stopDiscovery()" style="margin-bottom:0; border-color:#dc3545; color:#dc3545;" disabled>⏹ Stop</button>
@@ -668,6 +696,11 @@
                 return;
             }
 
+            const checkedDays = Array.from(document.querySelectorAll('.scrape-day-cb:checked')).map(cb => cb.value);
+            const checkedLocs = Array.from(document.querySelectorAll('.scrape-loc-cb:checked')).map(cb => cb.value);
+            const scrape_days = checkedDays.join(',');
+            const scrape_locations = checkedLocs.join(',');
+
             discoveredClasses = [];
             document.getElementById('discover-terminal').innerHTML = '';
             document.getElementById('discovered-section').style.display = 'none';
@@ -686,7 +719,7 @@
             discoverWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
 
             discoverWs.onopen = function() {
-                discoverWs.send(JSON.stringify({ email, password, student_id }));
+                discoverWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations }));
             };
 
             discoverWs.onmessage = function(event) {

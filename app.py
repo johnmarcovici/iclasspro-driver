@@ -135,6 +135,8 @@ async def websocket_scrape(websocket: WebSocket):
         email = config.get("email", "")
         password = config.get("password", "")
         student_id = config.get("student_id", "")
+        scrape_days = config.get("scrape_days", "")
+        scrape_locations = config.get("scrape_locations", "")
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -155,6 +157,10 @@ async def websocket_scrape(websocket: WebSocket):
             str(student_id),
             "--scrape",
         ]
+        if scrape_days:
+            cmd_args.extend(["--scrape-days", scrape_days])
+        if scrape_locations:
+            cmd_args.extend(["--scrape-locations", scrape_locations])
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
