@@ -4,6 +4,7 @@ import os
 import sys
 from typing import List, Dict
 
+import yaml
 from dotenv import load_dotenv, set_key, find_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
@@ -34,6 +35,13 @@ os.makedirs("schedules/tmp", exist_ok=True)
 templates = Jinja2Templates(directory="templates")
 
 
+def _load_locations() -> list:
+    """Load the known locations list from config/locations.yaml."""
+    config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f).get("locations", [])
+
+
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     context = {
@@ -44,6 +52,7 @@ async def get(request: Request):
         "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
         "initial_schedule": [],
         "default_schedule_filename": None,
+        "locations": _load_locations(),
     }
 
     # Try to load the default schedule from .env to pre-populate the grid
@@ -123,6 +132,183 @@ async def save_schedule(request: ScheduleSaveRequest):
     return {"message": f"Successfully saved {safe_filename}"}
 
 
+@app.websocket("/ws/scrape")
+async def websocket_scrape(websocket: WebSocket):
+    await websocket.accept()
+    process = None
+
+    try:
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+        scrape_days = config.get("scrape_days", "")
+        scrape_locations = config.get("scrape_locations", "")
+        deep_scrape = config.get("deep_scrape", False)
+
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                "Error: Email, password, and student ID are required."
+            )
+            await websocket.close()
+            return
+
+        await websocket.send_text("Starting class discovery scrape...")
+
+        cmd_args = [
+            "iclasspro.py",
+            "--email",
+            email,
+            "--password",
+            password,
+            "--student-id",
+            str(student_id),
+            "--scrape",
+        ]
+        if scrape_days:
+            cmd_args.extend(["--scrape-days", scrape_days])
+        if scrape_locations:
+            cmd_args.extend(["--scrape-locations", scrape_locations])
+        if deep_scrape:
+            cmd_args.append("--deep-scrape")
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8").rstrip()
+            await websocket.send_text(text_line)
+
+        await process.wait()
+
+        if process.returncode != 0 and process.returncode not in (-15, -9):
+            await websocket.send_text(
+                f"Discovery failed with exit code {process.returncode}."
+            )
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"Error: {str(e)}")
+        except Exception:
+            pass
+    finally:
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/enroll-selected")
+async def websocket_enroll_selected(websocket: WebSocket):
+    await websocket.accept()
+    process = None
+
+    try:
+        config_data = await websocket.receive_text()
+        config = json.loads(config_data)
+
+        email = config.get("email", "")
+        password = config.get("password", "")
+        student_id = config.get("student_id", "")
+        promo_code = config.get("promo_code", "")
+        complete_transaction = config.get("complete_transaction", True)
+        selected_classes = config.get("selected_classes", [])
+
+        if not all([email, password, student_id]):
+            await websocket.send_text(
+                "Error: Email, password, and student ID are required."
+            )
+            await websocket.close()
+            return
+
+        if not selected_classes:
+            await websocket.send_text("Error: No classes selected for enrollment.")
+            await websocket.close()
+            return
+
+        # Save selected classes to a temporary file
+        tmp_path = "schedules/tmp/schedule.json"
+        with open(tmp_path, "w") as f:
+            json.dump(selected_classes, f, indent=4)
+
+        await websocket.send_text("Starting enrollment of selected classes...")
+
+        cmd_args = [
+            "iclasspro.py",
+            "--email",
+            email,
+            "--password",
+            password,
+            "--student-id",
+            str(student_id),
+            "--schedule",
+            tmp_path,
+        ]
+
+        if promo_code:
+            cmd_args.extend(["--promo-code", promo_code])
+
+        if complete_transaction:
+            cmd_args.append("--complete-transaction")
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8").rstrip()
+            await websocket.send_text(text_line)
+
+        await process.wait()
+
+        if process.returncode == 0:
+            await websocket.send_text("Enrollment completed successfully.")
+        elif process.returncode not in (-15, -9):
+            await websocket.send_text(
+                f"Enrollment failed with exit code {process.returncode}."
+            )
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(f"Error: {str(e)}")
+        except Exception:
+            pass
+    finally:
+        if process and process.returncode is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.websocket("/ws/run")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -137,6 +323,7 @@ async def websocket_endpoint(websocket: WebSocket):
         password = config.get("password", "")
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
+        complete_transaction = config.get("complete_transaction", True)
         schedule = config.get("schedule", [])
 
         if not all([email, password, student_id]):
@@ -154,9 +341,9 @@ async def websocket_endpoint(websocket: WebSocket):
             return
 
         # Save the schedule to a temporary file
-        tmp_schedule_path = "schedules/tmp/web_schedule.json"
+        tmp_schedule_path = "schedules/tmp/schedule.json"
         with open(tmp_schedule_path, "w") as f:
-            json.dump(schedule, f)
+            json.dump(schedule, f, indent=4)
 
         # Send a starting message
         await websocket.send_text("Starting iClassPro automation...")
@@ -176,6 +363,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
         if promo_code:
             cmd_args.extend(["--promo-code", promo_code])
+
+        if complete_transaction:
+            cmd_args.append("--complete-transaction")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
