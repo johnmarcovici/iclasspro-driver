@@ -610,6 +610,11 @@
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const schedule = getScheduleData();
+            const schedulePayload = schedule.map(({ Location, Day, Time }) => ({
+                Location,
+                Day,
+                Time
+            }));
 
             // Silently update the .env file with the last run schedule
             if (currentScheduleFilename) {
@@ -629,7 +634,7 @@
                 return;
             }
 
-            if (schedule.length === 0) {
+            if (schedulePayload.length === 0) {
                 alert("Please add at least one valid class to the schedule.");
                 return;
             }
@@ -651,7 +656,7 @@
                     student_id: student_id,
                     promo_code: promo_code,
                     complete_transaction: complete_transaction,
-                    schedule: schedule
+                    schedule: schedulePayload
                 }));
             };
 

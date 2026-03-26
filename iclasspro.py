@@ -25,6 +25,18 @@ load_dotenv(override=True)
 # Group 1 captures the bare time string (e.g. "10:30am").
 _TIME_RE = re.compile(r"\bat\s+(\d{1,2}:\d{2}(?:am|pm))", re.IGNORECASE)
 
+WEEK_DAYS = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+]
+DAY_TO_QUERY_INDEX = {name.lower(): idx for idx, name in enumerate(WEEK_DAYS, start=1)}
+logger = logging.getLogger(__name__)
+
 
 # --- Email Function ---
 def send_log_email(
@@ -88,15 +100,15 @@ def send_log_email(
         msg.attach(MIMEText(text_content, "plain"))
         msg.attach(MIMEText(html_content, "html"))
 
-        logging.info("Connecting to SMTP server to send log email...")
+        logger.info("Connecting to SMTP server to send log email...")
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(from_addr, app_password)
             server.send_message(msg)
-        logging.info("Log email sent successfully.")
+        logger.info("Log email sent successfully.")
 
     except Exception as e:
-        logging.error(f"Failed to send log email: {e}")
+        logger.error(f"Failed to send log email: {e}")
 
 
 # --- Main Class ---
@@ -135,7 +147,7 @@ class IClassPro:
         headless = os.getenv("ICLASS_HEADLESS", "1").lower() not in ("0", "false", "no")
         slow_mo = int(os.getenv("ICLASS_SLOW_MO", "0"))
 
-        logging.info(f"Launching browser (headless={headless}, slow_mo={slow_mo}ms)")
+        logger.info(f"Launching browser (headless={headless}, slow_mo={slow_mo}ms)")
         self.browser = self.playwright.chromium.launch(
             headless=headless,
             slow_mo=slow_mo,
@@ -164,7 +176,7 @@ class IClassPro:
         )
         self.page = self.context.new_page()
         Stealth().apply_stealth_sync(self.page)
-        logging.info("Browser launched successfully.")
+        logger.info("Browser launched successfully.")
 
     def _get_cart_item_count(self) -> int:
         """Return an estimated number of cart items from the DOM."""
@@ -179,30 +191,30 @@ class IClassPro:
             for sel in selectors:
                 count = self.page.locator(sel).count()
                 if count > 0:
-                    logging.debug(f"Found {count} cart items with selector '{sel}'.")
+                    logger.debug(f"Found {count} cart items with selector '{sel}'.")
                     return count
         except Exception as e:
-            logging.warning(f"Could not get cart item count from DOM: {e}")
+            logger.warning(f"Could not get cart item count from DOM: {e}")
         return 0
 
     def _wait_for_cart_item_count(
         self, min_count: int = 1, timeout: int = 60000
     ) -> int:
         """Wait until the cart appears to have at least `min_count` items."""
-        logging.info(f"Waiting for cart to contain at least {min_count} item(s)...")
+        logger.info(f"Waiting for cart to contain at least {min_count} item(s)...")
         deadline = time.time() + timeout / 1000.0
         while time.time() < deadline:
             count = self._get_cart_item_count()
             if count >= min_count:
-                logging.info(f"Cart item count is now {count}.")
+                logger.info(f"Cart item count is now {count}.")
                 return count
             time.sleep(0.5)
-        logging.warning("Timeout reached while waiting for cart item count.")
+        logger.warning("Timeout reached while waiting for cart item count.")
         return 0
 
     def login(self, email: str = "", password: str = "") -> None:
         """Logs into the iClassPro portal."""
-        logging.info("Navigating to login page...")
+        logger.info("Navigating to login page...")
         login_url = self.base_url.rstrip("/") + "/login?showLogin=1"
         self.page.goto(login_url, wait_until="load")
         self.page.wait_for_timeout(5000)
@@ -212,27 +224,27 @@ class IClassPro:
         try:
             location_button = self.page.locator("span:has-text('SCAQ')")
             if location_button.is_visible(timeout=5000):
-                logging.info("Selecting location 'SCAQ'.")
+                logger.info("Selecting location 'SCAQ'.")
                 location_button.click()
                 self.page.wait_for_timeout(2000)
                 self.page.wait_for_selector('input[type="email"]', timeout=10000)
         except Exception as e:
-            logging.debug(f"Location selection modal not found, proceeding. Error: {e}")
+            logger.debug(f"Location selection modal not found, proceeding. Error: {e}")
 
         # Handle "Are you a current customer?" modal
         try:
             yes_button = self.page.locator("button:has-text('Yes')")
             if yes_button.is_visible(timeout=5000):
-                logging.info("Clicking 'Yes' on 'current customer' modal.")
+                logger.info("Clicking 'Yes' on 'current customer' modal.")
                 self.take_screenshot("02_before_clicking_yes.png")
                 yes_button.click()
                 self.page.wait_for_timeout(1000)
                 self.take_screenshot("03_after_clicking_yes.png")
         except Exception:
-            logging.debug("'Current customer' modal not found, proceeding.")
+            logger.debug("'Current customer' modal not found, proceeding.")
 
         # Fill credentials
-        logging.info("Entering login credentials.")
+        logger.info("Entering login credentials.")
         self.take_screenshot("04_before_login_attempt.png")
         self.page.locator("#email").fill(email)
         self.page.locator("#password").fill(password)
@@ -242,9 +254,9 @@ class IClassPro:
         # Wait for successful login (e.g., by checking for a dashboard element)
         try:
             self.page.wait_for_selector("text=/My Account/i", timeout=15000)
-            logging.info("Login successful.")
+            logger.info("Login successful.")
         except Exception:
-            logging.error("Login failed. Could not find 'My Account' text after login.")
+            logger.error("Login failed. Could not find 'My Account' text after login.")
             self.take_screenshot("login_failure.png")
             raise RuntimeError("Login failed. Please check credentials and portal URL.")
 
@@ -257,17 +269,13 @@ class IClassPro:
         class_index: int,
     ) -> None:
         """Finds and adds a single class to the cart."""
-        logging.info(f"Searching for class: {daystr} at {timestr} in {location}")
-        days = [
-            "sunday",
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-        ]
-        day_query = f"&days={days.index(daystr.lower()) + 1}"
+        logger.info(f"Searching for class: {daystr} at {timestr} in {location}")
+        day_index = DAY_TO_QUERY_INDEX.get(daystr.strip().lower())
+        if day_index is None:
+            valid_days = ", ".join(WEEK_DAYS)
+            raise ValueError(f"Invalid day '{daystr}'. Expected one of: {valid_days}")
+
+        day_query = f"&days={day_index}"
         student_query = f"&selectedStudents={student_id}"
         booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
 
@@ -282,7 +290,7 @@ class IClassPro:
 
             # If there are multiple (e.g., this week and next week), pick the last one
             count = class_link.count()
-            logging.info(
+            logger.info(
                 f"Found {count} class link(s) for {timestr}. Clicking the latest one to enroll."
             )
             class_link.last.click()
@@ -317,7 +325,7 @@ class IClassPro:
         self, promo_code: str = "", complete_transaction: bool = False
     ) -> None:
         """Navigates to the cart and completes checkout."""
-        logging.info("Processing cart...")
+        logger.info("Processing cart...")
         cart_url = self.base_url.rstrip("/") + "/cart"
         self.page.goto(cart_url, wait_until="load")
         self.page.wait_for_timeout(5000)  # Extra wait for cart to render fully
@@ -325,11 +333,11 @@ class IClassPro:
         self.take_screenshot("cart_final.png", full_page=True)
 
         if self._get_cart_item_count() == 0:
-            logging.warning("Cart is empty. Nothing to process.")
+            logger.warning("Cart is empty. Nothing to process.")
             return
 
         if promo_code:
-            logging.info(f"Applying promo code: {promo_code}")
+            logger.info(f"Applying promo code: {promo_code}")
             self.page.locator("a:has-text('Use Promo Code')").click()
             self.page.wait_for_timeout(1000)
             self.page.locator("[name='promoCode']").fill(promo_code)
@@ -337,16 +345,16 @@ class IClassPro:
             self.page.wait_for_timeout(2000)
 
         if complete_transaction:
-            logging.info("Attempting to complete transaction...")
+            logger.info("Attempting to complete transaction...")
             self.page.locator("button:has-text('Complete Transaction')").click()
-            logging.info("Waiting 15 seconds for transaction to finalize...")
+            logger.info("Waiting 15 seconds for transaction to finalize...")
             self.page.wait_for_timeout(15000)
             self.take_screenshot("transaction_complete.png", full_page=True)
-            logging.info("Transaction submitted.")
+            logger.info("Transaction submitted.")
         else:
-            logging.info("Dry run enabled. Skipping final transaction completion.")
+            logger.info("Dry run enabled. Skipping final transaction completion.")
 
-        logging.info("Cart processing complete.")
+        logger.info("Cart processing complete.")
 
     def scrape_classes(
         self,
@@ -369,15 +377,6 @@ class IClassPro:
         # JS-navigated class cards often share a placeholder href (e.g. "#") which
         # would cause every class after the first to be dropped as a "duplicate".
         seen_keys = set()
-        all_days = [
-            "Sunday",
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-        ]
 
         # Normalise filter lists so comparisons are case-insensitive
         days_filter_norm = (
@@ -391,18 +390,16 @@ class IClassPro:
 
         days_to_scrape = [
             (idx, name)
-            for idx, name in enumerate(all_days, start=1)
+            for idx, name in enumerate(WEEK_DAYS, start=1)
             if not days_filter_norm or name.lower() in days_filter_norm
         ]
         if days_filter_norm:
-            logging.info(
-                f"Day filter active: scraping {[n for _, n in days_to_scrape]}"
-            )
+            logger.info(f"Day filter active: scraping {[n for _, n in days_to_scrape]}")
         if locations_filter_norm:
-            logging.info(f"Location filter active: keeping {locations_filter_norm}")
+            logger.info(f"Location filter active: keeping {locations_filter_norm}")
 
         for day_idx, day_name in days_to_scrape:
-            logging.info(f"Scraping classes for {day_name}...")
+            logger.info(f"Scraping classes for {day_name}...")
             url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
             self.page.goto(url, wait_until="load")
             self.page.wait_for_timeout(2000)
@@ -545,25 +542,25 @@ class IClassPro:
                     discovered.append(
                         {
                             "name": name,
-                            "location": location,
-                            "day": day_name,
-                            "time": time_str,
+                            "Location": location,
+                            "Day": day_name,
+                            "Time": time_str,
                             "url": class_url,
                         }
                     )
-                    logging.info(
+                    logger.info(
                         f"  Found: {day_name} at {time_str} — {name}"
                         f" ({location or 'location unknown'})"
                     )
                 except Exception as e:
-                    logging.debug(f"Error processing anchor: {e}")
+                    logger.debug(f"Error processing anchor: {e}")
 
-        logging.info(f"Discovery complete. Found {len(discovered)} class(es).")
+        logger.info(f"Discovery complete. Found {len(discovered)} class(es).")
         return discovered
 
     def enroll_by_url(self, url: str, class_index: int) -> None:
         """Navigate directly to a class URL and add it to the cart."""
-        logging.info(f"Enrolling via direct URL: {url}")
+        logger.info(f"Enrolling via direct URL: {url}")
         self.page.goto(url, wait_until="load")
         self.take_screenshot(f"classes_page_url_{class_index}.png", full_page=True)
 
@@ -593,10 +590,10 @@ class IClassPro:
         """Safely close the browser and Playwright instances."""
         if self.browser:
             self.browser.close()
-            logging.info("Browser closed.")
+            logger.info("Browser closed.")
         if self.playwright:
             self.playwright.stop()
-            logging.info("Playwright stopped.")
+            logger.info("Playwright stopped.")
 
 
 def main():
@@ -690,35 +687,33 @@ def main():
     # --- Setup Logging ---
     log_file = "iclasspro.log"
     # Get the root logger
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
     # Create a formatter
     formatter = logging.Formatter(
         "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
     # Remove any existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
     # Create a file handler
     file_handler = logging.FileHandler(log_file, mode="w")
     file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    root_logger.addHandler(file_handler)
     # Create a stream handler (for console output)
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
+    root_logger.addHandler(stream_handler)
 
     if not all([args.email, args.password, args.student_id]):
-        logging.error(
+        logger.error(
             "Missing required environment variables or arguments: ICLASS_EMAIL, ICLASS_PASSWORD, ICLASS_STUDENT_ID"
         )
         exit(1)
 
-    logging.info(f"Starting iClassPro enrollment bot for email: {args.email}")
-    logging.info(
-        f"Password: {'*' * len(args.password) if args.password else 'Not set'}"
-    )
-    logging.info(f"Student ID: {args.student_id}")
+    logger.info(f"Starting iClassPro enrollment bot for email: {args.email}")
+    logger.info(f"Password: {'*' * len(args.password) if args.password else 'Not set'}")
+    logger.info(f"Student ID: {args.student_id}")
 
     driver = IClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
     main_exception = None
@@ -727,7 +722,7 @@ def main():
     try:
         if args.scrape:
             # --- Scrape mode: discover available classes and emit JSON ---
-            logging.info("Mode: scrape available classes")
+            logger.info("Mode: scrape available classes")
             days_filter = [d.strip() for d in args.scrape_days.split(",") if d.strip()]
             locations_filter = [
                 l.strip() for l in args.scrape_locations.split(",") if l.strip()
@@ -741,84 +736,37 @@ def main():
             )
             # Emit a single parseable line that the web UI will detect
             print(f"CLASSES_JSON:{json.dumps(classes)}", flush=True)
-            logging.info("All operations completed.")
-
-        elif args.enroll_urls:
-            # --- URL-based enrollment mode ---
-            logging.info(f"Mode: enroll from URL list: {args.enroll_urls}")
-            with open(args.enroll_urls, "r") as f:
-                url_schedule = json.load(f)
-
-            if url_schedule:
-                log_df = pd.DataFrame(url_schedule)
-                if "url" in log_df.columns:
-                    log_df = log_df.drop(columns=["url"])
-                logging.info(
-                    f"URL-based schedule to process:\n{log_df.to_string(index=False)}"
-                )
-
-            driver.webdriver()
-            driver.login(email=args.email, password=args.password)
-
-            for i, class_info in enumerate(url_schedule):
-                log_info = {
-                    k: v for k, v in class_info.items() if k not in ("url", "name")
-                }
-                logging.info(
-                    f"--- Processing class {i+1}/{len(url_schedule)}: \n{json.dumps(log_info, indent=4)} ---"
-                )
-                try:
-                    driver.enroll(
-                        location=class_info.get("location", ""),
-                        timestr=class_info.get("time", ""),
-                        daystr=class_info.get("day", ""),
-                        student_id=args.student_id,
-                        class_index=i,
-                    )
-                    summary_data.append(
-                        {"class": class_info, "status": "Success", "error": ""}
-                    )
-                except Exception as e:
-                    logging.error(f"Failed to enroll in class {class_info}: {e}")
-                    summary_data.append(
-                        {"class": class_info, "status": "Failed", "error": str(e)}
-                    )
-                    driver.take_screenshot(f"error_class_{i}.png")
-
-            driver.process_cart(
-                promo_code=args.promo_code,
-                complete_transaction=args.complete_transaction,
-            )
-            logging.info("All operations completed.")
+            logger.info("All operations completed.")
 
         else:
-            # --- Original schedule-based enrollment mode ---
-            logging.info(f"Mode: schedule-based enrollment, schedule: {args.schedule}")
-            with open(args.schedule, "r") as f:
+            # --- Enrollment mode (from URL list or schedule file) ---
+            schedule_path = args.enroll_urls or args.schedule
+            logger.info(f"Mode: enrollment, schedule: {schedule_path}")
+            with open(schedule_path, "r") as f:
                 schedule = json.load(f)
 
             if schedule:
-                schedule_df = pd.DataFrame(schedule)
-                if "rowId" in schedule_df.columns:
-                    schedule_df = schedule_df.drop(columns=["rowId"])
-                logging.info(
-                    f"Schedule to process:\n{schedule_df.to_string(index=False)}"
+                logger.info(
+                    f"Schedule to process:\n{pd.DataFrame(schedule).drop(columns=['url', 'name', 'rowId'], errors='ignore').to_string(index=False)}"
                 )
 
             driver.webdriver()
             driver.login(email=args.email, password=args.password)
 
             for i, class_info in enumerate(schedule):
-                # Create a copy for logging that excludes internal metadata
-                log_info = {k: v for k, v in class_info.items() if k != "rowId"}
-                logging.info(
+                log_info = {
+                    k: v
+                    for k, v in class_info.items()
+                    if k not in ("url", "name", "rowId")
+                }
+                logger.info(
                     f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
                 try:
                     driver.enroll(
-                        location=class_info["Location"],
-                        timestr=class_info["Time"],
-                        daystr=class_info["Day"],
+                        location=class_info.get("Location", ""),
+                        timestr=class_info.get("Time", ""),
+                        daystr=class_info.get("Day", ""),
                         student_id=args.student_id,
                         class_index=i,
                     )
@@ -826,7 +774,7 @@ def main():
                         {"class": class_info, "status": "Success", "error": ""}
                     )
                 except Exception as e:
-                    logging.error(f"Failed to enroll in class {class_info}: {e}")
+                    logger.error(f"Failed to enroll in class {class_info}: {e}")
                     summary_data.append(
                         {"class": class_info, "status": "Failed", "error": str(e)}
                     )
@@ -836,16 +784,16 @@ def main():
                 promo_code=args.promo_code,
                 complete_transaction=args.complete_transaction,
             )
-            logging.info("All operations completed.")
+            logger.info("All operations completed.")
 
     except Exception as e:
-        logging.critical(f"A critical error occurred: {e}")
+        logger.critical(f"A critical error occurred: {e}")
         main_exception = e
     finally:
         driver.close()
 
         if args.send_email and not args.scrape:
-            logging.info("Email sending is enabled. Checking credentials...")
+            logger.info("Email sending is enabled. Checking credentials...")
             to_addr = args.email
             from_addr = args.email
             app_password = os.getenv("ICLASS_EMAIL_APP_PASSWORD")
@@ -863,10 +811,10 @@ def main():
                     summary_data=summary_data,
                 )
             else:
-                logging.warning(
+                logger.warning(
                     "Cannot send log email. Missing one or more required environment variables."
                 )
-        logging.info("Script finished.")
+        logger.info("Script finished.")
 
 
 if __name__ == "__main__":
