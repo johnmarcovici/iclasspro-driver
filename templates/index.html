@@ -780,9 +780,14 @@
             tbody.innerHTML = '';
             classes.forEach(function(cls, idx) {
                 const tr = document.createElement('tr');
+                const url = cls.url || '';
+                const isRealUrl = url && /^https?:\/\//i.test(url) && !url.endsWith('#');
+                const nameCell = isRealUrl
+                    ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(cls.name || '—') + '</a>'
+                    : escapeHtml(cls.name || '—');
                 tr.innerHTML =
                     '<td><input type="checkbox" class="class-checkbox" data-index="' + idx + '" checked></td>' +
-                    '<td>' + escapeHtml(cls.name || '—') + '</td>' +
+                    '<td>' + nameCell + '</td>' +
                     '<td>' + escapeHtml(cls.day || '—') + '</td>' +
                     '<td>' + escapeHtml(cls.time || '—') + '</td>' +
                     '<td>' + escapeHtml(cls.location || '—') + '</td>';

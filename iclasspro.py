@@ -21,6 +21,9 @@ from playwright_stealth import Stealth
 # Load environment variables from .env file
 load_dotenv(override=True)
 
+# Regex that matches a time token like "at 10:30am" in class-card link text.
+# Group 1 captures the bare time string (e.g. "10:30am").
+_TIME_RE = re.compile(r"\bat\s+(\d{1,2}:\d{2}(?:am|pm))", re.IGNORECASE)
 
 # --- Email Function ---
 def send_log_email(
@@ -417,10 +420,18 @@ class IClassPro:
                     href = anchor.get_attribute("href") or ""
 
                     # Only process links whose text contains a time pattern like "at 5:45am"
-                    time_match = re.search(
-                        r"\bat\s+(\d{1,2}:\d{2}(?:am|pm))", text, re.IGNORECASE
-                    )
+                    time_match = _TIME_RE.search(text)
                     if not time_match or not href:
+                        continue
+
+                    # Skip bare "at TIME" links (e.g. navigation/filter anchors).
+                    # Real class-card links always contain a class descriptor before
+                    # the time (e.g. "Culver:Sunday 03/29 at 10:30am - Long Course").
+                    # Bare time links match the time regex but have no prefix content;
+                    # processing them causes phantom rows whose name is misassigned from
+                    # whichever card heading happens to be first in the parent container.
+                    text_prefix = _TIME_RE.sub("", text).strip()
+                    if not text_prefix:
                         continue
 
                     # Build absolute URL (best-effort; may be a fragment URL like
@@ -430,49 +441,19 @@ class IClassPro:
                     else:
                         class_url = urljoin(self.base_url, href)
 
+                    # Use the anchor text itself as the class name.  Both name and
+                    # time_str are derived from the same source so they can never
+                    # be mismatched (the previous parent-heading approach could stamp
+                    # the wrong heading onto unrelated time-only links).
                     time_str = time_match.group(1)
-
-                    # Try to extract class name and location from parent container
-                    name = ""
+                    name = text
                     location = ""
-                    parent_text = ""
-                    try:
-                        # Walk up to the nearest card/list-item/article ancestor
-                        parent = anchor.locator(
-                            "xpath=./ancestor::*["
-                            "contains(@class,'card') or "
-                            "contains(@class,'class') or "
-                            "contains(@class,'item') or "
-                            "self::article or self::li"
-                            "][1]"
-                        ).first
-                        parent_text = (parent.text_content() or "").strip()
-
-                        # Grab the first heading-like element in the parent
-                        heading_el = parent.locator(
-                            "h1, h2, h3, h4, h5, h6, strong"
-                        ).first
-                        candidate = (heading_el.text_content() or "").strip()
-                        if candidate:
-                            name = candidate
-                    except Exception:
-                        pass
-
-                    # Fallback: derive name from the text before "at TIME"
-                    if not name:
-                        name_part = re.sub(
-                            r"\bat\s+\d{1,2}:\d{2}(?:am|pm).*",
-                            "",
-                            text,
-                            flags=re.IGNORECASE,
-                        ).strip()
-                        name = name_part if name_part else text
 
                     # --- Location extraction ---
-                    # Card headings follow the pattern "Location:Day Date at Time - Type"
+                    # Class-card links follow the pattern "Location:Day Date at Time - Type"
                     # (e.g. "Culver:Sunday 03/29 at 10:30am - Long Course").  Extract the
                     # prefix before the first colon as the primary location signal; it
-                    # avoids false positives from nav/sidebar text that lists all locations.
+                    # avoids false positives from sidebar text that lists all locations.
                     colon_idx = name.find(":")
                     if colon_idx > 0:
                         prefix = name[:colon_idx].strip()
@@ -482,18 +463,10 @@ class IClassPro:
                                 location = loc
                                 break
 
-                    # Fallback: substring search in name → anchor text → parent card text
+                    # Fallback: substring search in the full anchor text
                     if not location:
-                        for search_text in [name, text]:
-                            for loc in self.KNOWN_LOCATIONS:
-                                if loc.lower() in search_text.lower():
-                                    location = loc
-                                    break
-                            if location:
-                                break
-                    if not location and parent_text:
                         for loc in self.KNOWN_LOCATIONS:
-                            if loc.lower() in parent_text.lower():
+                            if loc.lower() in name.lower():
                                 location = loc
                                 break
 
