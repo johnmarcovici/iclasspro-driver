@@ -25,6 +25,7 @@ load_dotenv(override=True)
 # Group 1 captures the bare time string (e.g. "10:30am").
 _TIME_RE = re.compile(r"\bat\s+(\d{1,2}:\d{2}(?:am|pm))", re.IGNORECASE)
 
+
 # --- Email Function ---
 def send_log_email(
     log_file_path,
@@ -155,10 +156,12 @@ class IClassPro:
             extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
         )
         # Add anti-bot-detection scripts
-        self.context.add_init_script("""
+        self.context.add_init_script(
+            """
             Object.defineProperty(navigator, 'webdriver', {get: () => false});
             Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            """)
+            """
+        )
         self.page = self.context.new_page()
         Stealth().apply_stealth_sync(self.page)
         logging.info("Browser launched successfully.")
@@ -378,9 +381,7 @@ class IClassPro:
 
         # Normalise filter lists so comparisons are case-insensitive
         days_filter_norm = (
-            [d.strip().lower() for d in days_filter if d.strip()]
-            if days_filter
-            else []
+            [d.strip().lower() for d in days_filter if d.strip()] if days_filter else []
         )
         locations_filter_norm = (
             [l.strip().lower() for l in locations_filter if l.strip()]
@@ -439,9 +440,10 @@ class IClassPro:
                     # First check if this anchor's own href already has the ID.
                     # If not, traverse upward in the DOM to find a sibling
                     # "class-details" link that carries the numeric class ID.
-                    class_id_match = re.search(r'/class-details/(\d+)', href)
+                    class_id_match = re.search(r"/class-details/(\d+)", href)
                     if not class_id_match:
-                        details_href = anchor.evaluate(r"""el => {
+                        details_href = anchor.evaluate(
+                            r"""el => {
                             let node = el.parentElement;
                             while (node && node.tagName !== 'BODY') {
                                 const links = node.querySelectorAll(
@@ -454,9 +456,10 @@ class IClassPro:
                                 node = node.parentElement;
                             }
                             return '';
-                        }""")
+                        }"""
+                        )
                         class_id_match = re.search(
-                            r'/class-details/(\d+)', details_href
+                            r"/class-details/(\d+)", details_href
                         )
 
                     if class_id_match:
@@ -493,8 +496,8 @@ class IClassPro:
 
                     if not name:
                         for split_pat in (
-                            r'\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\|',
-                            r'\s+(?:Available\b|View\b)',
+                            r"\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\|",
+                            r"\s+(?:Available\b|View\b)",
                         ):
                             parts = re.split(
                                 split_pat, text, maxsplit=1, flags=re.IGNORECASE
@@ -513,7 +516,10 @@ class IClassPro:
                     if colon_idx > 0:
                         prefix = name[:colon_idx].strip()
                         for loc in self.KNOWN_LOCATIONS:
-                            if loc.lower() == prefix.lower() or loc.lower() in prefix.lower():
+                            if (
+                                loc.lower() == prefix.lower()
+                                or loc.lower() in prefix.lower()
+                            ):
                                 location = loc
                                 break
 
@@ -524,7 +530,10 @@ class IClassPro:
                                 break
 
                     # Apply location filter (if requested)
-                    if locations_filter_norm and location.lower() not in locations_filter_norm:
+                    if (
+                        locations_filter_norm
+                        and location.lower() not in locations_filter_norm
+                    ):
                         continue
 
                     # Deduplicate by (day, time, name)
@@ -720,7 +729,9 @@ def main():
             # --- Scrape mode: discover available classes and emit JSON ---
             logging.info("Mode: scrape available classes")
             days_filter = [d.strip() for d in args.scrape_days.split(",") if d.strip()]
-            locations_filter = [l.strip() for l in args.scrape_locations.split(",") if l.strip()]
+            locations_filter = [
+                l.strip() for l in args.scrape_locations.split(",") if l.strip()
+            ]
             driver.webdriver()
             driver.login(email=args.email, password=args.password)
             classes = driver.scrape_classes(
@@ -750,7 +761,9 @@ def main():
             driver.login(email=args.email, password=args.password)
 
             for i, class_info in enumerate(url_schedule):
-                log_info = {k: v for k, v in class_info.items() if k != "url"}
+                log_info = {
+                    k: v for k, v in class_info.items() if k not in ("url", "name")
+                }
                 logging.info(
                     f"--- Processing class {i+1}/{len(url_schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
