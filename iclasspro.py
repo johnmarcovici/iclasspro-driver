@@ -99,7 +99,7 @@ def send_log_email(
 
 class IClassPro:
     # Known location names used for both UI dropdowns and class-name extraction.
-    KNOWN_LOCATIONS = ["El Segundo", "Santa Monica", "Culver", "Echo"]
+    KNOWN_LOCATIONS = ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"]
 
     def __init__(self, base_url: str = "", save_screenshots: bool = False):
         self.base_url = base_url

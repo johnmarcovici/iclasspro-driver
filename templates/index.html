@@ -277,6 +277,7 @@
                             <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Santa Monica"> Santa Monica</label>
                             <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Culver"> Culver</label>
                             <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="Echo"> Echo</label>
+                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="VNSO"> VNSO</label>
                         </div>
                     </div>
                 </div>
@@ -452,7 +453,7 @@
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
             // Location
-            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo"];
+            const predefinedLocs = ["El Segundo", "Santa Monica", "Culver", "Echo", "VNSO"];
             let isCustomLoc = loc && !predefinedLocs.includes(loc);
             let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
             if (isCustomLoc) {
