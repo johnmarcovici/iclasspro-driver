@@ -262,29 +262,31 @@
 
             <!-- Discovery filters -->
             <section style="margin-top:0;">
-                <h4 style="margin-bottom:0.5rem;">Filters <span style="font-weight:normal;font-size:0.85em;color:#888;">(leave all unchecked to scrape everything)</span></h4>
-                <div style="display:flex; gap:2rem; flex-wrap:wrap;">
-                    <div>
-                        <strong>Days</strong>
-                        <div id="scrape-days-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Sunday"> Sun</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Monday"> Mon</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Tuesday"> Tue</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Wednesday"> Wed</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Thursday"> Thu</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Friday"> Fri</label>
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Saturday"> Sat</label>
+                <details open>
+                    <summary><strong>Filters</strong> <span style="font-weight:normal;font-size:0.85em;color:#888;">(leave all unchecked to scrape everything)</span></summary>
+                    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
+                        <div>
+                            <strong>Days</strong>
+                            <div id="scrape-days-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Sunday"> Sun</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Monday"> Mon</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Tuesday"> Tue</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Wednesday"> Wed</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Thursday"> Thu</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Friday"> Fri</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Saturday"> Sat</label>
+                            </div>
+                        </div>
+                        <div>
+                            <strong>Locations</strong>
+                            <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                {% for loc in locations %}
+                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="{{ loc }}"> {{ loc }}</label>
+                                {% endfor %}
+                            </div>
                         </div>
                     </div>
-                    <div>
-                        <strong>Locations</strong>
-                        <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                            {% for loc in locations %}
-                            <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="{{ loc }}"> {{ loc }}</label>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
+                </details>
             </section>
 
             <!-- Discovery controls -->
@@ -314,6 +316,34 @@
                         <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect All</button>
                     </div>
                 </div>
+
+                <details open style="margin-bottom:0.9rem; padding:0.75rem; border:1px solid var(--table-border-color, #dee2e6); border-radius:6px;">
+                    <summary><strong>Filter Displayed Results</strong></summary>
+                    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
+                        <div>
+                            <strong>Days</strong>
+                            <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Sunday" onchange="applyDiscoveredTableFilters()"> Sun</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Monday" onchange="applyDiscoveredTableFilters()"> Mon</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Tuesday" onchange="applyDiscoveredTableFilters()"> Tue</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Wednesday" onchange="applyDiscoveredTableFilters()"> Wed</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Thursday" onchange="applyDiscoveredTableFilters()"> Thu</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Friday" onchange="applyDiscoveredTableFilters()"> Fri</label>
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Saturday" onchange="applyDiscoveredTableFilters()"> Sat</label>
+                            </div>
+                        </div>
+                        <div>
+                            <strong>Locations</strong>
+                            <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                {% for loc in locations %}
+                                <label style="font-weight:normal;"><input type="checkbox" class="post-loc-cb" value="{{ loc }}" onchange="applyDiscoveredTableFilters()"> {{ loc }}</label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <small id="post-filter-summary" style="display:block; margin-top:0.5rem; color:#666;"></small>
+                </details>
+
                 <table id="discovered-classes-table">
                     <thead>
                         <tr>
@@ -819,6 +849,38 @@
             });
             document.getElementById('discovered-section').style.display = 'block';
             document.getElementById('enroll-selected-section').style.display = 'block';
+            applyDiscoveredTableFilters();
+        }
+
+        function applyDiscoveredTableFilters() {
+            const selectedDays = Array.from(document.querySelectorAll('.post-day-cb:checked'))
+                .map(cb => cb.value.toLowerCase());
+            const selectedLocs = Array.from(document.querySelectorAll('.post-loc-cb:checked'))
+                .map(cb => cb.value.trim().toLowerCase());
+
+            let visibleCount = 0;
+            document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
+                const cb = row.querySelector('.class-checkbox');
+                const idx = cb ? parseInt(cb.dataset.index, 10) : -1;
+                const cls = discoveredClasses[idx] || {};
+
+                const day = (cls.day || cls.Day || '').trim().toLowerCase();
+                const location = (cls.location || cls.Location || '').trim().toLowerCase();
+
+                const dayMatch = selectedDays.length === 0 || selectedDays.includes(day);
+                const locMatch = selectedLocs.length === 0 || selectedLocs.includes(location);
+                const shouldShow = dayMatch && locMatch;
+
+                row.style.display = shouldShow ? '' : 'none';
+                if (shouldShow) {
+                    visibleCount += 1;
+                }
+            });
+
+            const summary = document.getElementById('post-filter-summary');
+            if (summary) {
+                summary.innerText = `Showing ${visibleCount} of ${discoveredClasses.length} discovered class(es).`;
+            }
         }
 
         function escapeHtml(str) {
