@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 # Prepare environment (installs Docker, creates venv, installs Python dependencies)
-source prepare_env.sh
+REQUIRE_DOCKER=1 source prepare_env.sh
 
 # Require Docker
 if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
@@ -20,7 +20,7 @@ echo "================================================"
 echo ""
 
 # Warn if containers already running
-if docker-compose ps 2>/dev/null | grep -q "Up"; then
+if run_docker_compose ps 2>/dev/null | grep -q "Up"; then
     echo "⚠️  Containers already running. Use ./stop_local.sh to stop them."
     read -p "Continue anyway? (y/n) " -n 1 -r
     echo
@@ -51,4 +51,4 @@ for i in {1..30}; do
 done
 
 echo ""
-echo "⚠️  Dashboard not responding yet. Check logs with: docker-compose logs app"
+echo "⚠️  Dashboard not responding yet. Check logs with: ./stop_local.sh && ./run_local.sh"

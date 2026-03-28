@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 
 # Source prepare_env for helper functions
-source prepare_env.sh
+REQUIRE_DOCKER=1 source prepare_env.sh
 
 if ! command -v docker-compose &> /dev/null; then
     echo "❌ Error: docker-compose is required"

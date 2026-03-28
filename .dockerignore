@@ -70,10 +70,8 @@ docs/
 *.md
 
 # Docker
-Dockerfile
 docker-compose.yml
 docker-compose.override.yml
-docker-entrypoint.sh
 
 # Cloud
 k8s-service.yaml

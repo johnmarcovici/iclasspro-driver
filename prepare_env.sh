@@ -15,68 +15,68 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Helper function to run docker commands (automatically handles permissions)
-# First check if docker works without sudo, if not use sudo
-_docker_needs_sudo=
-_check_docker_sudo() {
-    if [ -z "$_docker_needs_sudo" ]; then
-        if docker ps &>/dev/null; then
-            _docker_needs_sudo=0
-        else
-            _docker_needs_sudo=1
+# Optional Docker setup for containerized workflows.
+if [ "${REQUIRE_DOCKER:-0}" = "1" ]; then
+    # Helper function to run docker commands (automatically handles permissions)
+    # First check if docker works without sudo, if not use sudo.
+    _docker_needs_sudo=
+    _check_docker_sudo() {
+        if [ -z "$_docker_needs_sudo" ]; then
+            if docker ps &>/dev/null; then
+                _docker_needs_sudo=0
+            else
+                _docker_needs_sudo=1
+            fi
         fi
-    fi
-}
+    }
 
-run_docker() {
-    _check_docker_sudo
-    if [ "$_docker_needs_sudo" -eq 1 ]; then
-        sudo docker "$@"
+    run_docker() {
+        _check_docker_sudo
+        if [ "$_docker_needs_sudo" -eq 1 ]; then
+            sudo docker "$@"
+        else
+            docker "$@"
+        fi
+    }
+
+    run_docker_compose() {
+        _check_docker_sudo
+        if [ "$_docker_needs_sudo" -eq 1 ]; then
+            sudo docker-compose "$@"
+        else
+            docker-compose "$@"
+        fi
+    }
+
+    # Check and install Docker if needed (for containerized deployment)
+    if ! command -v docker &> /dev/null; then
+        echo "📦 Installing Docker..."
+        sudo apt-get update &> /dev/null
+        sudo apt-get install -y docker.io &> /dev/null
+        sudo usermod -aG docker "$USER"
+        echo "✅ Docker installed"
+        echo "   Note: Docker will work immediately with sudo; relogin enables passwordless access."
     else
-        docker "$@"
+        echo "✅ Docker already installed"
     fi
-}
 
-run_docker_compose() {
-    _check_docker_sudo
-    if [ "$_docker_needs_sudo" -eq 1 ]; then
-        sudo docker-compose "$@"
+    # Check and install docker-compose if needed
+    if ! command -v docker-compose &> /dev/null; then
+        echo "📦 Installing docker-compose..."
+        sudo apt-get install -y docker-compose &> /dev/null
+        echo "✅ docker-compose installed"
     else
-        docker-compose "$@"
+        echo "✅ docker-compose already installed"
     fi
-}
 
-# Check and install Docker if needed (for containerized deployment)
-if ! command -v docker &> /dev/null; then
-    echo "📦 Installing Docker..."
-    sudo apt-get update &> /dev/null
-    sudo apt-get install -y docker.io &> /dev/null
-    sudo usermod -aG docker $USER
-    echo "✅ Docker installed"
-    echo "   Note: Docker will work immediately, but logout/login needed for permanent non-sudo access"
-else
-    echo "✅ Docker already installed"
-fi
-
-# Check and install docker-compose if needed
-if ! command -v docker-compose &> /dev/null; then
-    echo "📦 Installing docker-compose..."
-    sudo apt-get install -y docker-compose &> /dev/null
-    echo "✅ docker-compose installed"
-else
-    echo "✅ docker-compose already installed"
-fi
-
-# Verify Docker works (with sudo if needed)
-if ! run_docker ps &>/dev/null; then
-    echo "⚠️  Docker requires sudo. Attempting with elevated privileges..."
-    if ! sudo docker ps &>/dev/null; then
-        echo "❌ Docker not working. Please restart your terminal."
+    # Verify Docker daemon access, with sudo fallback when needed.
+    if ! run_docker ps &>/dev/null; then
+        echo "❌ Docker daemon is not reachable. Start Docker and retry."
         exit 1
     fi
-fi
 
-echo ""
+    echo ""
+fi
 
 # Create virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
