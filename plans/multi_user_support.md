@@ -20,6 +20,9 @@ This works for one household/local user, but creates collisions and data leaks i
 - Support concurrent discovery and enrollment sessions safely.
 - Keep the UX simple for non-technical users.
 - Preserve current dashboard features while migrating backend architecture.
+- Keep one codebase that supports both:
+	- local self-hosted use on `localhost`
+	- always-on public cloud hosting
 
 ## Non-Goals (for initial rollout)
 
@@ -44,38 +47,32 @@ This works for one household/local user, but creates collisions and data leaks i
 5. Unbounded browser concurrency:
 - Each run launches Playwright without global admission control.
 
-## Architecture Options
+## Chosen Architecture
 
-### Option A: Browser-Local Profiles (Fastest, Lowest Scope)
+This plan formally chooses a full server-side multi-user architecture.
 
-Store credentials/schedules in browser storage (`localStorage` or IndexedDB), never on the server.
+- Identity, settings, schedules, jobs, and discovered results are stored per user in a database.
+- `.env` is runtime/server config only (no user credentials).
+- Websocket and API access are authenticated and user-scoped.
+- The same app runs locally or on Google Cloud with environment-specific config.
 
-Pros:
-- Very fast to ship.
-- No auth database required.
+## Authentication Decision
 
-Cons:
-- No cross-device sync.
-- User loses data when browser storage is cleared.
-- Still needs server-side temp-file collision fixes and concurrency controls.
+Use iClassPro credentials as the only login (no separate dashboard account/password).
 
-### Option B: Full Server-Side Multi-User (Recommended)
+- Users sign in with the same iClassPro email + password they already use.
+- On login, the app validates credentials by performing a lightweight iClassPro auth check.
+- On success, the app issues a secure dashboard session cookie.
+- The iClassPro password is stored encrypted at rest so background jobs can run later.
+- No second profile password is introduced.
 
-Add authentication + database-backed user data.
+Implementation note:
+- The dashboard app still maintains an internal user record and session state, but identity is keyed off verified iClassPro credentials instead of a separate local password.
 
-Pros:
-- True cross-device experience.
-- Better security and auditability.
-- Cleaner path to hosted deployment.
-
-Cons:
-- More implementation effort.
-- Requires schema migrations and secret management.
-
-## Recommended Data Model (Option B)
+## Recommended Data Model
 
 - `users`
-	- `id`, `email`, `password_hash`, timestamps
+	- `id`, `iclass_email_normalized` (unique), `student_id`, `last_verified_at`, timestamps
 - `user_iclass_credentials`
 	- `user_id`, encrypted `iclass_email`, encrypted `iclass_password`, `student_id`, `promo_code`, `complete_transaction_default`
 - `schedules`
@@ -90,10 +87,11 @@ Cons:
 ## Security Requirements
 
 - Dashboard login/session with secure cookies.
-- Password hashing (`argon2` or `bcrypt`) for dashboard accounts.
 - Encrypt iClass credentials at rest (application-level encryption using a server secret key).
 - HTTPS in all non-local environments.
 - CSRF protection for mutating endpoints if cookie-auth is used.
+- Rate-limit login attempts to reduce credential stuffing risk.
+- Require periodic credential re-verification (for example, when repeated job auth failures occur).
 
 ## Execution and Concurrency Plan
 
@@ -120,6 +118,51 @@ Cons:
 - Websocket connect must require authenticated identity.
 - Discovery/enrollment websocket payloads should include only run-specific overrides; defaults come from user profile.
 
+## Deployment Strategy (Google Cloud, Always-On)
+
+This section is intentionally single-path with no alternatives.
+
+1. Runtime:
+- Deploy the FastAPI web app to Google Cloud Run (public HTTPS endpoint, min instances > 0 for warm starts).
+
+2. Database:
+- Use Cloud SQL for PostgreSQL.
+- Connect Cloud Run to Cloud SQL via private connector.
+
+3. Secrets and encryption:
+- Store application secrets in Secret Manager (session secret, credential encryption key, DB URL).
+- Rotate secrets with a defined runbook.
+
+4. Async job execution:
+- Keep the web service responsive by enqueueing discovery/enrollment jobs.
+- Use Cloud Tasks to dispatch jobs to a dedicated authenticated worker endpoint (also on Cloud Run).
+- Persist job state in PostgreSQL (`queued`, `running`, `succeeded`, `failed`, `cancelled`).
+
+5. Storage and logs:
+- Use Cloud Logging for structured application and job logs.
+- Optionally store job artifacts (exports/debug bundles) in Cloud Storage.
+
+6. Networking and protection:
+- Use HTTPS only.
+- Put Cloud Armor in front of the public endpoint for basic abuse protection.
+- Configure CORS strictly to known frontend origins.
+
+7. Domain and access:
+- Map a custom domain to Cloud Run.
+- Use managed certificates.
+
+8. Availability and operations:
+- Configure health checks and alerting (error rate, job failure rate, queue depth, p95 latency).
+- Use rolling deploys with traffic splitting for safe releases.
+
+## Local Development and Self-Hosted Flow
+
+The localhost flow remains a first-class path.
+
+- Users can still clone and run locally.
+- Local mode uses the same codebase and features as cloud mode.
+- The only differences are infrastructure bindings (local Postgres/SQLite vs Cloud SQL, local secrets vs Secret Manager, local URL vs public domain).
+
 ## Scrape-Specific Updates
 
 Because scrape capability was added after the original plan, include these in scope:
@@ -138,12 +181,12 @@ Because scrape capability was added after the original plan, include these in sc
 
 ### Phase 1: Introduce Identity
 
-- Add dashboard user auth (signup optional, login required).
+- Add dashboard auth using iClassPro credentials only (no separate signup/password).
 - Issue secure session cookies.
 
 ### Phase 2: Move State from `.env` to DB
 
-- Add user profile + encrypted iClass credentials.
+- Add user profile + encrypted iClass credentials and verification metadata.
 - Move schedule storage to DB (or user-scoped JSON directories as short bridge).
 - Keep `.env` for server/runtime settings only.
 
@@ -170,3 +213,4 @@ Because scrape capability was added after the original plan, include these in sc
 - No shared temp-file collisions under concurrent runs.
 - Dashboard defaults persist per user across sessions/devices.
 - `.env` no longer stores user credentials (runtime config only).
+- Users authenticate with iClassPro credentials and do not manage a second dashboard password.
