@@ -638,6 +638,20 @@
             }
         }
 
+        function saveConfigToEnv() {
+            fetch('/api/save-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: document.getElementById('email').value,
+                    password: document.getElementById('password').value,
+                    student_id: document.getElementById('student_id').value,
+                    promo_code: document.getElementById('promo_code').value,
+                    complete_transaction: document.getElementById('complete_transaction').checked
+                })
+            }).catch(err => console.error('Could not save config to .env:', err));
+        }
+
         async function startAutomation() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
@@ -650,6 +664,9 @@
                 Day,
                 Time
             }));
+
+            // Silently persist credentials and config to .env
+            saveConfigToEnv();
 
             // Silently update the .env file with the last run schedule
             if (currentScheduleFilename) {
@@ -736,6 +753,9 @@
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
+
+            // Silently persist credentials and config to .env
+            saveConfigToEnv();
 
             if (!email || !password || !student_id) {
                 alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
@@ -907,6 +927,9 @@
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
+
+            // Silently persist credentials and config to .env
+            saveConfigToEnv();
 
             if (!email || !password || !student_id) {
                 alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");

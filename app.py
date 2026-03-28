@@ -23,6 +23,14 @@ class UpdateEnvRequest(BaseModel):
     filename: str
 
 
+class SaveConfigRequest(BaseModel):
+    email: str
+    password: str
+    student_id: str
+    promo_code: str
+    complete_transaction: bool
+
+
 # Load environment variables
 load_dotenv(override=True)
 
@@ -95,6 +103,26 @@ async def update_default_schedule(request: UpdateEnvRequest):
 
     set_key(dotenv_path, "ICLASS_SCHEDULE", schedule_path)
     return {"message": f"Default schedule updated to {request.filename}"}
+
+
+@app.post("/api/save-config")
+async def save_config(request: SaveConfigRequest):
+    dotenv_path = find_dotenv()
+    if not dotenv_path:
+        with open(".env", "w") as f:
+            pass
+        dotenv_path = find_dotenv()
+
+    set_key(dotenv_path, "ICLASS_EMAIL", request.email)
+    set_key(dotenv_path, "ICLASS_PASSWORD", request.password)
+    set_key(dotenv_path, "ICLASS_STUDENT_ID", request.student_id)
+    set_key(dotenv_path, "ICLASS_PROMO_CODE", request.promo_code)
+    set_key(
+        dotenv_path,
+        "ICLASS_COMPLETE_TRANSACTION",
+        "1" if request.complete_transaction else "0",
+    )
+    return {"message": "Configuration saved"}
 
 
 @app.get("/api/schedules")

@@ -1,162 +1,95 @@
 # iClassPro Enrollment Bot
 
-Automates class discovery and enrollment on an iClassPro portal using Playwright.
+A web-based tool that automates class sign-ups on iClassPro portals. Open the dashboard in your browser, enter your credentials once, and let it handle the rest.
 
-You can use:
-- A web dashboard (recommended)
-- A command-line interface (CLI)
+## Getting Started
 
-## Features
+1. Clone this repository and open a terminal in the folder.
+2. Run:
+   ```bash
+   ./run_dashboard.sh
+   ```
+3. Open **http://localhost:8000** in your browser.
 
-- Manual enrollment from saved schedules
-- Class discovery mode (`--scrape`) with optional day/location filters
-- Optional deep scrape for detailed class URL and instructor info
-- Enroll selected discovered classes directly from the dashboard table
-- Pre-scrape filters (what gets scraped) and post-scrape filters (what is shown in table)
-- Optional promo code support
-- Optional final checkout (`--complete-transaction`)
-- Optional screenshots during runs
-- Optional email summary/log delivery
+That's it. The first time you run anything from the dashboard, your credentials are saved automatically and will be pre-filled next time you open it.
 
-## Quick Start (Dashboard)
+> **First run only:** The setup script will install the required dependencies and browser engine automatically. This takes a minute or two and won't happen again.
 
-Run:
+---
 
-```bash
-./run_dashboard.sh
-```
+## Using the Dashboard
 
-Then open `http://localhost:8000`.
+The dashboard has three sections:
 
-`run_dashboard.sh` will:
-- Source `prepare_env.sh`
-- Create `venv/` if missing
-- Install/update dependencies from `requirements.txt`
-- Install Playwright Chromium
-- Create `.env` from `.env.example` if missing
-- Start FastAPI (`uvicorn app:app`) on port `8000`
+### ⚙️ Configuration
 
-## Dashboard Workflow
+Enter your iClassPro login email, password, and student ID here. You can also add a promo code if you have one.
 
-The dashboard has 3 tabs:
+There's also a toggle for **Complete Transaction** — leave this **off** while testing so you can verify everything looks right without being charged.
 
-1. `Configuration`
-- Set email/password/student ID/promo code
-- Toggle whether to complete transaction
+**Your settings are saved automatically** whenever you run a discovery or enrollment, so you only need to enter them once.
 
-2. `Manual Enrollment`
-- Build or edit a schedule
-- Load/save schedules from `schedules/*.json`
-- Run enrollment and view live output
+### 📋 Manual Enrollment
 
-3. `Discover & Enroll`
-- Discover classes with optional pre-scrape day/location filters
-- Optional deep scrape for richer class details
-- Select/deselect discovered classes
-- Apply post-discovery table filters
-- Enroll selected classes
+Build a list of classes you want to enroll in by picking the day, location, and time for each one. You can save and reload these lists, which makes it easy to re-use the same schedule.
 
-## CLI Usage
+When you're ready, hit **Run Enrollment Schedule** and watch the live output.
 
-Run through the helper script:
+### 🔍 Discover & Enroll
 
-```bash
-./run_enrollment.sh
-```
+Not sure which classes are available? Use this tab to browse what's open:
 
-Pass overrides/flags as needed:
+1. Optionally filter by day or location before searching.
+2. Click **Discover Available Classes** — the tool will log in and pull the current availability.
+3. Review the results in the table. Use the post-discovery filters to narrow down what's shown.
+4. Check the classes you want, then click **Enroll Selected Classes**.
+
+Enable **Get detailed links & instructor info** for richer results (takes a bit longer).
+
+---
+
+## Your Credentials & Privacy
+
+Your login details are stored in a file called `.env` in this folder. It's created automatically the first time you run the tool and updated silently every time you use it — similar to how a website remembers you with a cookie.
+
+This file is excluded from version control (`.gitignore`), so your credentials will never be accidentally shared if you push code changes.
+
+---
+
+## Running on a Schedule (Advanced)
+
+If you want enrollments to run automatically at a specific time, you can set up a scheduled task. For example, to run every Sunday at 8:00 PM:
 
 ```bash
-./run_enrollment.sh --schedule schedules/full_week_schedule.json --complete-transaction
+0 20 * * 0 /path/to/iclasspro-driver/run_enrollment.sh >> /path/to/iclasspro-driver/cron.log 2>&1
 ```
 
-Direct script usage also works:
+---
+
+## For Technical Users
+
+The dashboard is a thin wrapper around `iclasspro.py`, which can also be run directly from the command line. This is useful for scripting, automation, or running on a headless server without the web UI.
 
 ```bash
 python3 iclasspro.py --help
 ```
 
-### Common CLI examples
+Key flags at a glance:
 
-Enroll from a schedule without final checkout:
+| Flag | Description |
+|---|---|
+| `--schedule` | Path to a schedule JSON file |
+| `--scrape` | Discover available classes instead of enrolling |
+| `--scrape-days` | Comma-separated days to filter discovery (e.g. `Monday,Wednesday`) |
+| `--scrape-locations` | Comma-separated locations to filter discovery |
+| `--deep-scrape` | Fetch richer class details during discovery (slower) |
+| `--complete-transaction` | Actually finalize the purchase |
+| `--promo-code` | Apply a promo code at checkout |
 
-```bash
-python3 iclasspro.py --schedule schedules/short_schedule.json
-```
+All flags can also be set via environment variables in the `.env` file. Run `--help` for the full list.
 
-Discover classes (no enrollment):
+---
 
-```bash
-python3 iclasspro.py --scrape
-```
+## A Note on Safety
 
-Discover only specific days/locations:
-
-```bash
-python3 iclasspro.py --scrape --scrape-days "Monday,Wednesday" --scrape-locations "Culver,El Segundo"
-```
-
-Deep scrape class details:
-
-```bash
-python3 iclasspro.py --scrape --deep-scrape
-```
-
-## Configuration
-
-### `.env`
-
-Create `.env` from `.env.example` and fill required values:
-
-- `ICLASS_EMAIL` (required)
-- `ICLASS_PASSWORD` (required)
-- `ICLASS_STUDENT_ID` (required)
-
-Supported optional values:
-
-- `ICLASS_BASE_URL` (default: `https://portal.iclasspro.com/scaq/`)
-- `ICLASS_PROMO_CODE`
-- `ICLASS_SCHEDULE` (default: `schedules/schedule.json`)
-- `ICLASS_COMPLETE_TRANSACTION` (`0/1`, `false/true`, `no/yes`)
-- `ICLASS_SAVE_SCREENSHOTS` (`0/1`)
-- `ICLASS_SEND_EMAIL` (`0/1`)
-- `ICLASS_SMTP_SERVER`
-- `ICLASS_SMTP_PORT`
-- `ICLASS_EMAIL_APP_PASSWORD`
-
-### Schedules
-
-Schedules are JSON arrays of classes, for example:
-
-```json
-[
-  {"Day": "Monday", "Location": "El Segundo", "Time": "5:45am"},
-  {"Day": "Saturday", "Location": "Santa Monica", "Time": "10:00am"}
-]
-```
-
-For discovered-class enrollment, the app also supports lowercase keys and URL-based entries generated by discovery.
-
-### Known Locations
-
-The dashboard location options come from:
-
-- `config/locations.yaml`
-
-Update that file to change predefined location choices.
-
-## Automation (cron)
-
-Example cron entry:
-
-```bash
-0 20 * * 0 /home/jmarcovici/repos/iclasspro-driver/run_enrollment.sh >> /home/jmarcovici/repos/iclasspro-driver/cron.log 2>&1
-```
-
-Use absolute paths in cron jobs.
-
-## Safety Notes
-
-- Leave transaction completion off while testing.
-- `--complete-transaction` (or `ICLASS_COMPLETE_TRANSACTION=1`) performs final checkout.
-- Keep `.env` private and never commit credentials.
+The **Complete Transaction** toggle controls whether the tool actually finalizes the purchase. When it's off, the bot will add classes to your cart but stop before checkout — useful for testing that it finds the right classes without any risk of being charged.
