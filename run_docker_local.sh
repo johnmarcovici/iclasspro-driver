@@ -1,6 +1,16 @@
 #!/bin/bash
 # Script to launch iClassPro Dashboard with PostgreSQL (multi-user setup)
-# Run this for local multi-user testing with a real database
+# Container runtime agnostic - supports docker, podman, and others
+#
+# Container Runtime Detection:
+#   - Respects CONTAINER_CLI environment variable for override
+#   - Auto-detects docker-compose, docker compose, podman-compose, podman compose
+#   - Works with any OCI-compatible container tool
+#
+# Examples:
+#   ./run_docker_local.sh                    # Auto-detect
+#   CONTAINER_CLI=podman ./run_docker_local.sh  # Force podman
+#   CONTAINER_CLI="docker compose" ./run_docker_local.sh  # Force docker v2
 
 set -e
 
@@ -11,26 +21,40 @@ echo "iClassPro Dashboard - Local Multi-User Environment"
 echo "================================================"
 echo ""
 
-# Check if docker and docker-compose are installed
-if ! command -v docker &> /dev/null; then
-    echo "❌ Error: Docker is not installed."
-    echo "   Download from: https://www.docker.com/products/docker-desktop"
-    exit 1
+# Detect container runtime
+# Support CONTAINER_CLI override via environment
+if [ -n "$CONTAINER_CLI" ]; then
+    COMPOSE_CMD="$CONTAINER_CLI"
+else
+    # Try to find compose command in order of preference
+    if command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        # Docker v2 with compose plugin
+        COMPOSE_CMD="docker compose"
+    elif command -v podman-compose &> /dev/null; then
+        COMPOSE_CMD="podman-compose"
+    elif command -v podman &> /dev/null && podman compose version &> /dev/null; then
+        # Podman v4+ with compose plugin
+        COMPOSE_CMD="podman compose"
+    else
+        echo "❌ Error: No container runtime found."
+        echo ""
+        echo "Install one of:"
+        echo "  • Docker Desktop - https://www.docker.com/products/docker-desktop"
+        echo "  • Podman - https://podman.io/docs/installation"
+        echo ""
+        exit 1
+    fi
 fi
 
-if ! command -v docker-compose &> /dev/null; then
-    echo "❌ Error: docker-compose is not installed."
-    echo "   It usually comes with Docker Desktop."
-    exit 1
-fi
-
-echo "✅ Docker is installed"
+echo "✅ Using container runtime: $COMPOSE_CMD"
 echo ""
 
 # Check if containers are already running
-if docker-compose ps 2>/dev/null | grep -q "Up"; then
+if $COMPOSE_CMD ps 2>/dev/null | grep -q "Up"; then
     echo "⚠️  Containers are already running."
-    echo "   Run './stop_docker_local.sh' to stop them, or continue here."
+    echo "   Run './stop_container_local.sh' to stop them, or continue here."
     read -p "   Continue anyway? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -42,7 +66,7 @@ echo "🚀 Starting services..."
 echo ""
 
 # Start services
-docker-compose up -d
+$COMPOSE_CMD up -d
 
 echo ""
 echo "✅ Services started successfully!"
@@ -57,7 +81,7 @@ echo "🗄️  pgAdmin:      http://localhost:5050"
 echo "   User: admin@example.com"
 echo "   Pass: admin"
 echo ""
-echo "💻 App logs:      docker-compose logs -f app"
+echo "💻 App logs:      $COMPOSE_CMD logs -f app"
 echo "🛑 Stop all:      ./stop_docker_local.sh"
 echo ""
 echo "================================================"

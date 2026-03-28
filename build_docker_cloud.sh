@@ -1,6 +1,16 @@
 #!/bin/bash
-# Script to build and push iClassPro Dashboard Docker image to Google Cloud
-# This prepares the application for cloud deployment
+# Script to build and push iClassPro Dashboard container image to Google Cloud
+# Container runtime agnostic - supports docker, podman, and others
+#
+# Container Runtime Detection:
+#   - Respects CONTAINER_CLI environment variable for override
+#   - Auto-detects docker, podman (any OCI-compatible builder)
+#   - Pushes to Google Container Registry (gcr.io)
+#
+# Examples:
+#   ./build_docker_cloud.sh                  # Auto-detect
+#   CONTAINER_CLI=podman ./build_docker_cloud.sh  # Force podman
+#   CONTAINER_CLI=docker ./build_docker_cloud.sh  # Force docker
 
 set -e
 
@@ -11,11 +21,21 @@ echo "iClassPro Dashboard - Cloud Build & Deploy"
 echo "================================================"
 echo ""
 
-# Check prerequisites
-if ! command -v docker &> /dev/null; then
-    echo "❌ Error: Docker is not installed."
-    echo "   Download from: https://www.docker.com/products/docker-desktop"
-    exit 1
+# Detect container runtime
+if [ -n "$CONTAINER_CLI" ]; then
+    CONTAINER_CMD="$CONTAINER_CLI"
+else
+    if command -v docker &> /dev/null; then
+        CONTAINER_CMD="docker"
+    elif command -v podman &> /dev/null; then
+        CONTAINER_CMD="podman"
+    else
+        echo "❌ Error: No container runtime found."
+        echo "   Install one of:"
+        echo "   • Docker - https://www.docker.com/products/docker-desktop"
+        echo "   • Podman - https://podman.io/docs/installation"
+        exit 1
+    fi
 fi
 
 if ! command -v gcloud &> /dev/null; then
@@ -24,7 +44,7 @@ if ! command -v gcloud &> /dev/null; then
     exit 1
 fi
 
-echo "✅ Docker is installed"
+echo "✅ Using container runtime: $CONTAINER_CMD"
 echo "✅ gcloud CLI is installed"
 echo ""
 
@@ -62,14 +82,14 @@ echo "  Tag:          $IMAGE_TAG"
 echo "  Registry URL: $REGISTRY_URL"
 echo ""
 
-# Configure Docker authentication
-echo "🔐 Configuring Docker authentication with Google Cloud..."
+# Configure authentication
+echo "🔐 Configuring container authentication with Google Cloud..."
 gcloud auth configure-docker
 
 echo ""
-echo "🔨 Building Docker image..."
+echo "🔨 Building container image..."
 echo "   (This may take a few minutes on first build)"
-docker build -t $REGISTRY_URL .
+$CONTAINER_CMD build -t $REGISTRY_URL .
 
 if [ $? -ne 0 ]; then
     echo "❌ Build failed. Check the error above."
@@ -77,7 +97,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "✅ Docker image built successfully!"
+echo "✅ Container image built successfully!"
 echo ""
 
 # Confirm push
@@ -85,13 +105,13 @@ read -p "Push image to Google Container Registry? (y/n) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "ℹ️  Image is built locally but not pushed."
-    echo "   Push later with: docker push $REGISTRY_URL"
+    echo "   Push later with: $CONTAINER_CMD push $REGISTRY_URL"
     exit 0
 fi
 
 echo ""
 echo "📤 Pushing image to Google Container Registry..."
-docker push $REGISTRY_URL
+$CONTAINER_CMD push $REGISTRY_URL
 
 if [ $? -ne 0 ]; then
     echo "❌ Push failed. Check your credentials and network."
