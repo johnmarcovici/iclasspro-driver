@@ -15,6 +15,27 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
+# Helper function to run docker commands (handles group membership issue)
+run_docker() {
+    if groups $USER | grep -q docker; then
+        # User is in docker group, run normally
+        docker "$@"
+    else
+        # User not in docker group yet, use sudo
+        sudo docker "$@"
+    fi
+}
+
+run_docker_compose() {
+    if groups $USER | grep -q docker; then
+        # User is in docker group, run normally
+        docker-compose "$@"
+    else
+        # User not in docker group yet, use sudo
+        sudo docker-compose "$@"
+    fi
+}
+
 # Check and install Docker if needed (for containerized deployment)
 if ! command -v docker &> /dev/null; then
     echo "📦 Installing Docker..."
@@ -22,7 +43,7 @@ if ! command -v docker &> /dev/null; then
     sudo apt-get install -y docker.io &> /dev/null
     sudo usermod -aG docker $USER
     echo "✅ Docker installed"
-    echo "   Note: You may need to log out and log back in, or run: newgrp docker"
+    echo "   Note: Docker will work immediately, but logout/login needed for permanent non-sudo access"
 else
     echo "✅ Docker already installed"
 fi
@@ -34,6 +55,15 @@ if ! command -v docker-compose &> /dev/null; then
     echo "✅ docker-compose installed"
 else
     echo "✅ docker-compose already installed"
+fi
+
+# Verify Docker works (with sudo if needed)
+if ! run_docker ps &>/dev/null; then
+    echo "⚠️  Docker requires sudo. Attempting with elevated privileges..."
+    if ! sudo docker ps &>/dev/null; then
+        echo "❌ Docker not working. Please restart your terminal."
+        exit 1
+    fi
 fi
 
 echo ""

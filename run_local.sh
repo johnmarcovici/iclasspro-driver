@@ -28,14 +28,14 @@ if docker-compose ps 2>/dev/null | grep -q "Up"; then
 fi
 
 echo "🚀 Starting services..."
-docker-compose up -d
+run_docker_compose up -d
 
 echo "✅ Services ready!"
 echo ""
 echo "📊 Dashboard: http://localhost:8000"
 echo "🗄️  pgAdmin:  http://localhost:5050 (admin / admin)"
 echo ""
-echo "To see logs:      docker-compose logs -f app"
+echo "To see logs:      run_docker_compose logs -f app"
 echo "To stop:          ./stop_local.sh"
 echo ""
 
