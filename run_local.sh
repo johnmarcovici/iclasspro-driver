@@ -27,6 +27,9 @@ if run_docker_compose ps 2>/dev/null | grep -q "Up"; then
     [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0
 fi
 
+# Ensure bind-mounted entrypoint is executable before container start.
+chmod +x docker-entrypoint.sh
+
 echo "🚀 Starting services..."
 run_docker_compose up -d
 

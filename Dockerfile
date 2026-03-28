@@ -46,4 +46,4 @@ RUN chmod +x /app/docker-entrypoint.sh
 EXPOSE 8000
 
 # Run the application via entrypoint
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["bash", "/app/docker-entrypoint.sh"]
