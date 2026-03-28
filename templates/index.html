@@ -317,8 +317,8 @@
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
                     <h4 style="margin:0;">Available Classes</h4>
                     <div style="display:flex; gap:0.5rem;">
-                        <button class="secondary" onclick="selectAllClasses()" style="width:auto; margin-bottom:0;">Select All</button>
-                        <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect All</button>
+                        <button class="secondary" onclick="selectAllClasses()" style="width:auto; margin-bottom:0;">Select Visible</button>
+                        <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect Visible</button>
                     </div>
                 </div>
 
@@ -1102,9 +1102,40 @@
                     '<td>' + escapeHtml(instructor) + '</td>';
                 tbody.appendChild(tr);
             });
+
+            // Keep selection summary accurate as users check/uncheck rows.
+            tbody.onchange = function(event) {
+                if (event.target && event.target.classList.contains('class-checkbox')) {
+                    updateDiscoveredSelectionSummary();
+                }
+            };
+
             document.getElementById('discovered-section').style.display = 'block';
             document.getElementById('enroll-selected-section').style.display = 'block';
             applyDiscoveredTableFilters();
+        }
+
+        function updateDiscoveredSelectionSummary() {
+            const rows = Array.from(document.querySelectorAll('#classes-table-body tr'));
+            const visibleRows = rows.filter(row => row.style.display !== 'none');
+            const selectedVisible = visibleRows.filter(row => {
+                const cb = row.querySelector('.class-checkbox');
+                return cb && cb.checked;
+            }).length;
+            const selectedHidden = rows.filter(row => {
+                if (row.style.display !== 'none') return false;
+                const cb = row.querySelector('.class-checkbox');
+                return cb && cb.checked;
+            }).length;
+
+            const summary = document.getElementById('post-filter-summary');
+            if (!summary) return;
+
+            let text = `Showing ${visibleRows.length} of ${discoveredClasses.length} discovered class(es). Selected (visible): ${selectedVisible}.`;
+            if (selectedHidden > 0) {
+                text += ` Hidden selected: ${selectedHidden} (not enrolled while filtered out).`;
+            }
+            summary.innerText = text;
         }
 
         function applyDiscoveredTableFilters() {
@@ -1113,7 +1144,6 @@
             const selectedLocs = Array.from(document.querySelectorAll('.post-loc-cb:checked'))
                 .map(cb => cb.value.trim().toLowerCase());
 
-            let visibleCount = 0;
             document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
                 const cb = row.querySelector('.class-checkbox');
                 const idx = cb ? parseInt(cb.dataset.index, 10) : -1;
@@ -1127,15 +1157,9 @@
                 const shouldShow = dayMatch && locMatch;
 
                 row.style.display = shouldShow ? '' : 'none';
-                if (shouldShow) {
-                    visibleCount += 1;
-                }
             });
 
-            const summary = document.getElementById('post-filter-summary');
-            if (summary) {
-                summary.innerText = `Showing ${visibleCount} of ${discoveredClasses.length} discovered class(es).`;
-            }
+            updateDiscoveredSelectionSummary();
         }
 
         function escapeHtml(str) {
@@ -1145,11 +1169,21 @@
         }
 
         function selectAllClasses() {
-            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = true; });
+            document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
+                if (row.style.display === 'none') return;
+                const cb = row.querySelector('.class-checkbox');
+                if (cb) cb.checked = true;
+            });
+            updateDiscoveredSelectionSummary();
         }
 
         function deselectAllClasses() {
-            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = false; });
+            document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
+                if (row.style.display === 'none') return;
+                const cb = row.querySelector('.class-checkbox');
+                if (cb) cb.checked = false;
+            });
+            updateDiscoveredSelectionSummary();
         }
 
         // ===== Enroll selected discovered classes =====
@@ -1173,8 +1207,12 @@
             }
 
             const selected = [];
-            document.querySelectorAll('.class-checkbox:checked').forEach(function(cb) {
-                const idx = parseInt(cb.dataset.index);
+            document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
+                if (row.style.display === 'none') return;
+                const cb = row.querySelector('.class-checkbox');
+                if (!cb || !cb.checked) return;
+
+                const idx = parseInt(cb.dataset.index, 10);
                 if (discoveredClasses[idx]) {
                     selected.push(discoveredClasses[idx]);
                 }
