@@ -29,8 +29,8 @@ fi
 # Ensure bind-mounted entrypoint is executable before container start.
 chmod +x docker-entrypoint.sh
 
-echo "🚀 Starting services..."
-run_docker_compose up -d
+echo "🚀 Building and starting services..."
+run_docker_compose up -d --build
 
 echo "✅ Services ready!"
 echo ""
