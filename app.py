@@ -233,6 +233,22 @@ def _get_user_by_id(user_id: int):
         return None
 
 
+def _is_dev_mode() -> bool:
+    return os.getenv("ENVIRONMENT", "development").lower() in (
+        "development",
+        "dev",
+        "local",
+    )
+
+
+def _get_local_env_credentials() -> Dict[str, str]:
+    return {
+        "email": os.getenv("ICLASS_EMAIL", "").strip(),
+        "password": os.getenv("ICLASS_PASSWORD", ""),
+        "student_id": os.getenv("ICLASS_STUDENT_ID", "").strip(),
+    }
+
+
 def _create_job(user_id: int, job_type: JobType, config: Dict):
     """Create a new job record."""
     job_id = str(uuid4())
@@ -452,7 +468,21 @@ async def get(request: Request):
 async def login_page(request: Request):
     if _get_authenticated_user(request):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request})
+
+    # In local/dev mode, pre-fill from .env so single-user workflows stay smooth.
+    defaults = {"email": "", "password": "", "student_id": ""}
+    if _is_dev_mode():
+        defaults = _get_local_env_credentials()
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "prefill_email": defaults["email"],
+            "prefill_password": defaults["password"],
+            "prefill_student_id": defaults["student_id"],
+        },
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -484,9 +514,28 @@ async def login(request: Request, payload: LoginRequest):
 
     is_valid = await asyncio.to_thread(_verify_iclass_credentials, email, password)
     if not is_valid:
-        raise HTTPException(
-            status_code=401, detail="Could not validate iClassPro credentials"
+        # Optional local fallback for development if payload exactly matches .env.
+        allow_fallback = os.getenv("ALLOW_LOCAL_ENV_LOGIN_FALLBACK", "1").lower() in (
+            "1",
+            "true",
+            "yes",
         )
+        env_creds = _get_local_env_credentials()
+        env_match = (
+            email == env_creds["email"]
+            and password == env_creds["password"]
+            and student_id == env_creds["student_id"]
+        )
+
+        if not (_is_dev_mode() and allow_fallback and env_match):
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Could not validate iClassPro credentials. "
+                    "If using local .env credentials, verify ICLASS_EMAIL, "
+                    "ICLASS_PASSWORD, and ICLASS_STUDENT_ID are current."
+                ),
+            )
 
     user_id = _upsert_user(email=email, password=password, student_id=student_id)
     request.session["user_id"] = user_id
