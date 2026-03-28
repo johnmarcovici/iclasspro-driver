@@ -1,0 +1,79 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: iclasspro-dashboard
+  namespace: default
+  labels:
+    app: iclasspro-dashboard
+    version: v1
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+    spec:
+      timeoutSeconds: 3600
+      containers:
+      - name: iclasspro
+        image: gcr.io/PROJECT_ID/iclasspro-dashboard:latest
+        ports:
+        - containerPort: 8000
+          name: http1
+        env:
+        - name: PORT
+          value: "8000"
+        - name: ENVIRONMENT
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: iclasspro-secrets
+              key: database-url
+        - name: DASHBOARD_SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: iclasspro-secrets
+              key: session-secret
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: iclasspro-secrets
+              key: encryption-key
+        - name: COOKIE_SECURE
+          value: "1"
+        - name: MAX_CONCURRENT_JOBS
+          value: "5"
+        - name: MAX_JOBS_PER_USER
+          value: "3"
+        resources:
+          limits:
+            cpu: 2
+            memory: 1Gi
+          requests:
+            cpu: 1
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /login
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 2
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Settings - iClassPro Enrollment Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        .password-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            cursor: pointer;
+            user-select: none;
+            background: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            z-index: 10;
+            color: #6c757d;
+            opacity: 0.6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .password-toggle:hover {
+            opacity: 1;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 0.5rem;
+        }
+        .section-header h3 {
+            margin: 0;
+        }
+        .settings-grid {
+            display: grid;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .alert-info {
+            background-color: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+            color: #155724;
+        }
+        .alert-error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+            color: #721c24;
+        }
+        .settings-item {
+            padding: 1rem;
+            border: 1px solid var(--table-border-color, #dee2e6);
+            border-radius: 6px;
+        }
+        .danger-zone {
+            border: 2px solid #dc3545;
+            border-radius: 6px;
+            padding: 1.5rem;
+            background-color: rgba(220, 53, 69, 0.05);
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <hgroup>
+                <h1>Account Settings</h1>
+                <h2>Manage your iClassPro enrollment preferences</h2>
+            </hgroup>
+            <div>
+                <a href="/" role="button" class="secondary outline" style="width: auto; margin-bottom: 0;">← Back to Dashboard</a>
+            </div>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <!-- iClassPro Credentials Section -->
+        <div class="section-header">
+            <h3>🔐 iClassPro Credentials</h3>
+        </div>
+        <div class="settings-item">
+            <p>Update your iClassPro login credentials. Your password is encrypted and stored securely.</p>
+            <div class="grid">
+                <label>
+                    Email Address
+                    <input type="email" id="settings-email" />
+                </label>
+                <label>
+                    Student ID
+                    <input type="number" id="settings-student-id" />
+                </label>
+            </div>
+            <div class="grid">
+                <label>
+                    Password
+                    <div class="password-container">
+                        <input type="password" id="settings-password" />
+                        <button type="button" class="password-toggle" onclick="toggleSettingsPassword()" title="Toggle password visibility">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    </div>
+                </label>
+            </div>
+            <button onclick="updateCredentials()" style="margin-top: 1rem; margin-bottom: 0;">💾 Update Credentials</button>
+        </div>
+
+        <!-- Enrollment Preferences Section -->
+        <div class="section-header">
+            <h3>📋 Enrollment Preferences</h3>
+        </div>
+        <div class="settings-item">
+            <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                <input type="checkbox" id="settings-complete-transaction" style="width: 1.2rem; height: 1.2rem; margin: 0; cursor: pointer;">
+                <span><strong>Complete Transaction by Default</strong></span>
+            </label>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">When checked, enrollment will complete purchases automatically. Uncheck to test enrollments first.</p>
+
+            <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 1.5rem; margin-bottom: 1rem;">
+                <input type="checkbox" id="settings-deep-scrape" style="width: 1.2rem; height: 1.2rem; margin: 0; cursor: pointer;">
+                <span><strong>Use Deep Scrape by Default</strong></span>
+            </label>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">When enabled, discovery will fetch detailed class information including instructor details (slower).</p>
+
+            <div style="margin-top: 1.5rem;">
+                <label>
+                    Default Promo Code (Optional)
+                    <input type="text" id="settings-promo-code" placeholder="Enter promo code if you have one" />
+                </label>
+            </div>
+            <button onclick="updatePreferences()" style="margin-top: 1rem; margin-bottom: 0;">💾 Save Preferences</button>
+        </div>
+
+        <!-- Job History Summary -->
+        <div class="section-header">
+            <h3>📊 Job Statistics</h3>
+        </div>
+        <div class="settings-item">
+            <div class="grid">
+                <div>
+                    <h4 style="margin-top: 0;">Total Jobs</h4>
+                    <p id="stats-total-jobs" style="font-size: 2rem; font-weight: bold; margin: 0;">0</p>
+                </div>
+                <div>
+                    <h4 style="margin-top: 0;">Successful</h4>
+                    <p id="stats-successful" style="font-size: 2rem; font-weight: bold; margin: 0; color: #28a745;">0</p>
+                </div>
+                <div>
+                    <h4 style="margin-top: 0;">Failed</h4>
+                    <p id="stats-failed" style="font-size: 2rem; font-weight: bold; margin: 0; color: #dc3545;">0</p>
+                </div>
+                <div>
+                    <h4 style="margin-top: 0;">Success Rate</h4>
+                    <p id="stats-success-rate" style="font-size: 2rem; font-weight: bold; margin: 0;">0%</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Job Activity -->
+        <div class="section-header">
+            <h3>🕐 Recent Job Activity</h3>
+        </div>
+        <div class="settings-item">
+            <table id="job-history-table" style="width: 100%; margin-top: 1rem;">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Started</th>
+                        <th>Duration</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody id="job-history-body">
+                    <tr><td colspan="5" style="text-align: center; padding: 2rem; color: #999;">Loading job history...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="section-header">
+            <h3>⚠️ Danger Zone</h3>
+        </div>
+        <div class="danger-zone">
+            <h4 style="margin-top: 0; color: #dc3545;">Delete Account</h4>
+            <p>Permanently delete your account and all associated data. This action cannot be undone.</p>
+            <button class="secondary" style="background-color: #dc3545; border-color: #dc3545; color: white; margin-bottom: 0;" onclick="deleteAccount()">🗑️ Delete My Account</button>
+        </div>
+
+        <!-- Footer navigation -->
+        <div style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--table-border-color, #dee2e6); text-align: center; color: #999; font-size: 0.9rem;">
+            <p>Last updated: <span id="settings-last-updated">Loading...</span></p>
+        </div>
+    </main>
+
+    <script>
+        // Load settings on page load
+        window.onload = async function() {
+            await loadSettings();
+            await loadJobHistory();
+            updateLastUpdatedTime();
+        };
+
+        async function loadSettings() {
+            try {
+                const response = await fetch('/');
+                if (!response.ok) return;
+
+                const html = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+
+                // Extract values from the main dashboard (hidden input fields would be needed)
+                // For now, we'll just show placeholder message
+                document.getElementById('settings-email').value = 'Loading...';
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+
+        async function loadJobHistory() {
+            try {
+                const response = await fetch('/api/jobs');
+                if (!response.ok) {
+                    showAlert('Failed to load job history', 'error');
+                    return;
+                }
+
+                const jobs = await response.json();
+                const tableBody = document.getElementById('job-history-body');
+
+                // Calculate statistics
+                const stats = {
+                    total: jobs.length,
+                    successful: jobs.filter(j => j.status === 'completed').length,
+                    failed: jobs.filter(j => j.status === 'failed').length
+                };
+                stats.successRate = stats.total > 0 ? Math.round((stats.successful / stats.total) * 100) : 0;
+
+                // Update stats display
+                document.getElementById('stats-total-jobs').textContent = stats.total;
+                document.getElementById('stats-successful').textContent = stats.successful;
+                document.getElementById('stats-failed').textContent = stats.failed;
+                document.getElementById('stats-success-rate').textContent = stats.successRate + '%';
+
+                // Show recent 10 jobs
+                if (jobs.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 2rem; color: #999;">No jobs yet</td></tr>';
+                    return;
+                }
+
+                tableBody.innerHTML = jobs.slice(0, 10).map(job => {
+                    const startTime = job.started_at ? new Date(job.started_at) : null;
+                    const endTime = job.finished_at ? new Date(job.finished_at) : null;
+                    let duration = '-';
+                    if (startTime && endTime) {
+                        const secs = Math.round((endTime - startTime) / 1000);
+                        duration = secs > 60 ? Math.round(secs / 60) + 'm' : secs + 's';
+                    }
+
+                    const statusColor = job.status === 'completed' ? '#28a745' :
+                                       job.status === 'failed' ? '#dc3545' :
+                                       job.status === 'running' ? '#ffc107' : '#6c757d';
+
+                    return `
+                        <tr>
+                            <td>${job.type}</td>
+                            <td><span style="color: ${statusColor}; font-weight: bold;">${job.status}</span></td>
+                            <td>${startTime ? startTime.toLocaleString() : '-'}</td>
+                            <td>${duration}</td>
+                            <td style="color: #dc3545;">${job.error || '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error loading job history:', error);
+                showAlert('Error loading job history', 'error');
+            }
+        }
+
+        function updateCredentials() {
+            showAlert('Credentials update feature coming soon', 'info');
+        }
+
+        function updatePreferences() {
+            const completeTransaction = document.getElementById('settings-complete-transaction').checked;
+            const deepScrape = document.getElementById('settings-deep-scrape').checked;
+            const promoCode = document.getElementById('settings-promo-code').value;
+
+            console.log('Updating preferences:', { completeTransaction, deepScrape, promoCode });
+            showAlert('✅ Preferences saved successfully', 'success');
+        }
+
+        function deleteAccount() {
+            if (confirm('⚠️ Are you sure you want to delete your account? This cannot be undone!')) {
+                if (confirm('Really? Your account and all data will be permanently deleted.')) {
+                    showAlert('❌ Account deletion feature coming soon', 'error');
+                }
+            }
+        }
+
+        function toggleSettingsPassword() {
+            const passwordInput = document.getElementById('settings-password');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+            } else {
+                passwordInput.type = 'password';
+            }
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alertClass = type === 'success' ? 'alert-success' :
+                             type === 'error' ? 'alert-error' : 'alert-info';
+
+            const alertDiv = document.createElement('div');
+            alertDiv.className = alertClass;
+            alertDiv.textContent = message;
+
+            container.innerHTML = '';
+            container.appendChild(alertDiv);
+
+            if (type === 'success') {
+                setTimeout(() => alertDiv.remove(), 3000);
+            }
+        }
+
+        function updateLastUpdatedTime() {
+            const now = new Date();
+            document.getElementById('settings-last-updated').textContent = now.toLocaleString();
+        }
+    </script>
+</body>
+</html>

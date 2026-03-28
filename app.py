@@ -1,22 +1,45 @@
 import asyncio
+import base64
 import json
 import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
-from typing import List, Dict
+from enum import Enum
+from typing import List, Dict, Optional
 from uuid import uuid4
 
 import yaml
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    BackgroundTasks,
+)
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 
 from iclasspro import IClassPro
+
+
+class JobType(str, Enum):
+    DISCOVER = "discover"
+    ENROLL_SCHEDULE = "enroll_schedule"
+    ENROLL_SELECTED = "enroll_selected"
+
+
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ScheduleSaveRequest(BaseModel):
@@ -42,8 +65,43 @@ class LoginRequest(BaseModel):
     student_id: str
 
 
+class JobConfigRequest(BaseModel):
+    job_type: JobType
+    scrape_days: str = ""
+    scrape_locations: str = ""
+    deep_scrape: bool = False
+    promo_code: str = ""
+    complete_transaction: Optional[bool] = None
+    schedule: List[Dict[str, str]] = []
+    selected_classes: List[Dict[str, str]] = []
+
+
 # Load environment variables
 load_dotenv(override=True)
+
+
+# Encryption setup
+def _get_cipher():
+    """Get or create encryption cipher for storing passwords."""
+    key = os.getenv("ENCRYPTION_KEY")
+    if not key:
+        # Generate a new key if one doesn't exist (for development)
+        key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+        print(f"Generated new ENCRYPTION_KEY. Set it in .env: ENCRYPTION_KEY={key}")
+    return Fernet(key.encode() if isinstance(key, str) else key)
+
+
+def _encrypt_password(password: str) -> str:
+    """Encrypt a password for storage."""
+    cipher = _get_cipher()
+    return cipher.encrypt(password.encode()).decode()
+
+
+def _decrypt_password(encrypted_password: str) -> str:
+    """Decrypt a stored password."""
+    cipher = _get_cipher()
+    return cipher.decrypt(encrypted_password.encode()).decode()
+
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
 app.add_middleware(
@@ -60,6 +118,12 @@ os.makedirs("schedules/users", exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 DB_PATH = os.path.join(os.path.dirname(__file__), "app.db")
+
+# Job queue management
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))
+MAX_JOBS_PER_USER = int(os.getenv("MAX_JOBS_PER_USER", "2"))
+_job_semaphore = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
+_job_processes: Dict[str, asyncio.subprocess.Process] = {}
 
 
 def _utc_now() -> str:
@@ -90,6 +154,33 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                job_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                config TEXT NOT NULL,
+                result TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)
+            """
+        )
 
 
 def _verify_iclass_credentials(email: str, password: str) -> bool:
@@ -108,6 +199,7 @@ def _verify_iclass_credentials(email: str, password: str) -> bool:
 
 def _upsert_user(email: str, password: str, student_id: str) -> int:
     now = _utc_now()
+    encrypted_pwd = _encrypt_password(password)
     with _get_db_conn() as conn:
         conn.execute(
             """
@@ -116,7 +208,7 @@ def _upsert_user(email: str, password: str, student_id: str) -> int:
             ON CONFLICT(iclass_email, student_id)
             DO UPDATE SET iclass_password=excluded.iclass_password, updated_at=excluded.updated_at
             """,
-            (email.strip(), password, str(student_id).strip(), now, now),
+            (email.strip(), encrypted_pwd, str(student_id).strip(), now, now),
         )
         row = conn.execute(
             "SELECT id FROM users WHERE iclass_email = ? AND student_id = ?",
@@ -127,7 +219,88 @@ def _upsert_user(email: str, password: str, student_id: str) -> int:
 
 def _get_user_by_id(user_id: int):
     with _get_db_conn() as conn:
-        return conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if user:
+            # Decrypt password for internal use
+            try:
+                decrypted_pwd = _decrypt_password(user["iclass_password"])
+                # Return a dict-like object with decrypted password
+                user_dict = dict(user)
+                user_dict["iclass_password"] = decrypted_pwd
+                return user_dict
+            except Exception:
+                return user
+        return None
+
+
+def _create_job(user_id: int, job_type: JobType, config: Dict):
+    """Create a new job record."""
+    job_id = str(uuid4())
+    now = _utc_now()
+    with _get_db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO jobs (id, user_id, job_type, status, config, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                user_id,
+                job_type.value,
+                JobStatus.QUEUED.value,
+                json.dumps(config),
+                now,
+            ),
+        )
+    return job_id
+
+
+def _get_job(job_id: str):
+    """Fetch a job by ID."""
+    with _get_db_conn() as conn:
+        return conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+
+def _update_job_status(
+    job_id: str, status: JobStatus, error_msg: str = None, result: str = None
+):
+    """Update job status."""
+    now = _utc_now()
+    with _get_db_conn() as conn:
+        updates = {"status": status.value}
+        if status == JobStatus.RUNNING and not _get_job(job_id)["started_at"]:
+            updates["started_at"] = now
+        if status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+            updates["finished_at"] = now
+        if error_msg:
+            updates["error_message"] = error_msg
+        if result:
+            updates["result"] = result
+
+        update_str = ", ".join(f"{k} = ?" for k in updates.keys())
+        conn.execute(
+            f"UPDATE jobs SET {update_str} WHERE id = ?",
+            list(updates.values()) + [job_id],
+        )
+
+
+def _list_user_jobs(user_id: int, limit: int = 50):
+    """List a user's jobs, most recent first."""
+    with _get_db_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+
+
+def _count_user_active_jobs(user_id: int) -> int:
+    """Count how many jobs a user has in QUEUED or RUNNING state."""
+    with _get_db_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM jobs WHERE user_id = ? AND status IN (?, ?)",
+            (user_id, JobStatus.QUEUED.value, JobStatus.RUNNING.value),
+        ).fetchone()
+    return row["cnt"] if row else 0
 
 
 def _get_authenticated_user(request: Request):
@@ -156,6 +329,67 @@ def _user_schedule_dir(user_id: int) -> str:
     user_dir = os.path.join("schedules", "users", str(user_id))
     os.makedirs(user_dir, exist_ok=True)
     return user_dir
+
+
+async def _run_job_process(job_id: str, cmd_args: List[str], user_id: int):
+    """Execute a background job process and track its status."""
+    try:
+        _update_job_status(job_id, JobStatus.RUNNING)
+
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        _job_processes[job_id] = process
+
+        output_lines = []
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text_line = line.decode("utf-8").rstrip()
+            output_lines.append(text_line)
+
+        await process.wait()
+
+        if process.returncode == 0:
+            _update_job_status(
+                job_id, JobStatus.COMPLETED, result="\n".join(output_lines)
+            )
+        else:
+            error_msg = f"Process failed with exit code {process.returncode}"
+            _update_job_status(job_id, JobStatus.FAILED, error_msg=error_msg)
+
+    except asyncio.CancelledError:
+        _update_job_status(job_id, JobStatus.CANCELLED)
+        if job_id in _job_processes:
+            try:
+                _job_processes[job_id].terminate()
+            except OSError:
+                pass
+        raise
+    except Exception as e:
+        _update_job_status(job_id, JobStatus.FAILED, error_msg=str(e))
+    finally:
+        if job_id in _job_processes:
+            del _job_processes[job_id]
+
+
+async def _enqueue_and_run_job(
+    user_id: int, job_type: JobType, config: Dict, cmd_args: List[str]
+):
+    """Enqueue a job and run it as a background task."""
+    job_id = _create_job(user_id, job_type, config)
+
+    # Acquire semaphore and run job
+    async def run():
+        async with _job_semaphore:
+            await _run_job_process(job_id, cmd_args, user_id)
+
+    asyncio.create_task(run())
+    return job_id
 
 
 _init_db()
@@ -221,6 +455,22 @@ async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    context = {
+        "request": request,
+        "email": user["iclass_email"],
+        "student_id": user["student_id"],
+        "promo_code": user["promo_code"],
+        "complete_transaction": bool(user["complete_transaction"]),
+    }
+    return templates.TemplateResponse("settings.html", context)
+
+
 @app.post("/api/auth/login")
 async def login(request: Request, payload: LoginRequest):
     email = payload.email.strip()
@@ -249,8 +499,75 @@ async def logout(request: Request):
     return {"message": "Logged out"}
 
 
-@app.post("/api/update-default-schedule")
-async def update_default_schedule(request: Request, payload: UpdateEnvRequest):
+@app.get("/api/jobs")
+async def list_jobs(request: Request):
+    """List current user's jobs."""
+    user = _require_authenticated_user(request)
+    jobs = _list_user_jobs(int(user["id"]))
+    return [
+        {
+            "id": dict(job)["id"],
+            "type": dict(job)["job_type"],
+            "status": dict(job)["status"],
+            "created_at": dict(job)["created_at"],
+            "started_at": dict(job)["started_at"],
+            "finished_at": dict(job)["finished_at"],
+            "error": dict(job)["error_message"],
+        }
+        for job in jobs
+    ]
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str, request: Request):
+    """Get status of a specific job."""
+    user = _require_authenticated_user(request)
+    job = _get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_dict = dict(job)
+    if job_dict["user_id"] != int(user["id"]):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    return {
+        "id": job_dict["id"],
+        "type": job_dict["job_type"],
+        "status": job_dict["status"],
+        "created_at": job_dict["created_at"],
+        "started_at": job_dict["started_at"],
+        "finished_at": job_dict["finished_at"],
+        "error": job_dict["error_message"],
+        "result": job_dict["result"],
+    }
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, request: Request):
+    """Cancel a running job."""
+    user = _require_authenticated_user(request)
+    job = _get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job_dict = dict(job)
+    if job_dict["user_id"] != int(user["id"]):
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    if job_dict["status"] not in (JobStatus.QUEUED.value, JobStatus.RUNNING.value):
+        raise HTTPException(status_code=400, detail="Cannot cancel completed job")
+
+    if job_id in _job_processes:
+        try:
+            _job_processes[job_id].terminate()
+        except OSError:
+            pass
+
+    _update_job_status(job_id, JobStatus.CANCELLED)
+    return {"message": "Job cancelled"}
+
     user = _require_authenticated_user(request)
     safe_filename = os.path.basename(payload.filename)
     schedule_path = os.path.join(_user_schedule_dir(int(user["id"])), safe_filename)
@@ -335,11 +652,21 @@ async def save_schedule(request: Request, payload: ScheduleSaveRequest):
 async def websocket_scrape(websocket: WebSocket):
     await websocket.accept()
     process = None
+    job_id = None
 
     try:
         user = _get_authenticated_ws_user(websocket)
         if not user:
             await websocket.send_text("Error: Authentication required.")
+            await websocket.close()
+            return
+
+        # Check if user is at active job limit
+        active = _count_user_active_jobs(int(user["id"]))
+        if active >= MAX_JOBS_PER_USER:
+            await websocket.send_text(
+                f"Error: Maximum {MAX_JOBS_PER_USER} concurrent jobs allowed per user."
+            )
             await websocket.close()
             return
 
@@ -360,6 +687,11 @@ async def websocket_scrape(websocket: WebSocket):
             await websocket.close()
             return
 
+        # Create job record
+        job_id = _create_job(int(user["id"]), JobType.DISCOVER, config)
+        _update_job_status(job_id, JobStatus.RUNNING)
+
+        await websocket.send_text(f"Job {job_id} started.")
         await websocket.send_text("Starting class discovery scrape...")
 
         cmd_args = [
@@ -379,30 +711,42 @@ async def websocket_scrape(websocket: WebSocket):
         if deep_scrape:
             cmd_args.append("--deep-scrape")
 
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            *cmd_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            text_line = line.decode("utf-8").rstrip()
-            await websocket.send_text(text_line)
-
-        await process.wait()
-
-        if process.returncode != 0 and process.returncode not in (-15, -9):
-            await websocket.send_text(
-                f"Discovery failed with exit code {process.returncode}."
+        async with _job_semaphore:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
             )
+            _job_processes[job_id] = process
+
+            output_lines = []
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                text_line = line.decode("utf-8").rstrip()
+                output_lines.append(text_line)
+                await websocket.send_text(text_line)
+
+            await process.wait()
+
+            if process.returncode == 0:
+                _update_job_status(
+                    job_id, JobStatus.COMPLETED, result="\n".join(output_lines)
+                )
+                await websocket.send_text("Discovery completed successfully.")
+            else:
+                error_msg = f"Discovery failed with exit code {process.returncode}"
+                _update_job_status(job_id, JobStatus.FAILED, error_msg=error_msg)
+                await websocket.send_text(error_msg)
 
     except WebSocketDisconnect:
-        pass
+        if job_id:
+            _update_job_status(job_id, JobStatus.CANCELLED)
     except Exception as e:
+        if job_id:
+            _update_job_status(job_id, JobStatus.FAILED, error_msg=str(e))
         try:
             await websocket.send_text(f"Error: {str(e)}")
         except Exception:
@@ -413,6 +757,8 @@ async def websocket_scrape(websocket: WebSocket):
                 process.terminate()
             except OSError:
                 pass
+        if job_id and job_id in _job_processes:
+            del _job_processes[job_id]
         try:
             await websocket.close()
         except Exception:
@@ -424,11 +770,21 @@ async def websocket_enroll_selected(websocket: WebSocket):
     await websocket.accept()
     process = None
     tmp_path = None
+    job_id = None
 
     try:
         user = _get_authenticated_ws_user(websocket)
         if not user:
             await websocket.send_text("Error: Authentication required.")
+            await websocket.close()
+            return
+
+        # Check if user is at active job limit
+        active = _count_user_active_jobs(int(user["id"]))
+        if active >= MAX_JOBS_PER_USER:
+            await websocket.send_text(
+                f"Error: Maximum {MAX_JOBS_PER_USER} concurrent jobs allowed per user."
+            )
             await websocket.close()
             return
 
@@ -456,11 +812,16 @@ async def websocket_enroll_selected(websocket: WebSocket):
             await websocket.close()
             return
 
+        # Create job record
+        job_id = _create_job(int(user["id"]), JobType.ENROLL_SELECTED, config)
+        _update_job_status(job_id, JobStatus.RUNNING)
+
         # Save selected classes to a unique temporary file per run
         tmp_path = os.path.join("schedules", "tmp", f"schedule_{uuid4().hex}.json")
         with open(tmp_path, "w") as f:
             json.dump(selected_classes, f, indent=4)
 
+        await websocket.send_text(f"Job {job_id} started.")
         await websocket.send_text("Starting enrollment of selected classes...")
 
         cmd_args = [
@@ -481,32 +842,42 @@ async def websocket_enroll_selected(websocket: WebSocket):
         if complete_transaction:
             cmd_args.append("--complete-transaction")
 
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            *cmd_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            text_line = line.decode("utf-8").rstrip()
-            await websocket.send_text(text_line)
-
-        await process.wait()
-
-        if process.returncode == 0:
-            await websocket.send_text("Enrollment completed successfully.")
-        elif process.returncode not in (-15, -9):
-            await websocket.send_text(
-                f"Enrollment failed with exit code {process.returncode}."
+        async with _job_semaphore:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
             )
+            _job_processes[job_id] = process
+
+            output_lines = []
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                text_line = line.decode("utf-8").rstrip()
+                output_lines.append(text_line)
+                await websocket.send_text(text_line)
+
+            await process.wait()
+
+            if process.returncode == 0:
+                _update_job_status(
+                    job_id, JobStatus.COMPLETED, result="\n".join(output_lines)
+                )
+                await websocket.send_text("Enrollment completed successfully.")
+            else:
+                error_msg = f"Enrollment failed with exit code {process.returncode}"
+                _update_job_status(job_id, JobStatus.FAILED, error_msg=error_msg)
+                await websocket.send_text(error_msg)
 
     except WebSocketDisconnect:
-        pass
+        if job_id:
+            _update_job_status(job_id, JobStatus.CANCELLED)
     except Exception as e:
+        if job_id:
+            _update_job_status(job_id, JobStatus.FAILED, error_msg=str(e))
         try:
             await websocket.send_text(f"Error: {str(e)}")
         except Exception:
@@ -522,6 +893,8 @@ async def websocket_enroll_selected(websocket: WebSocket):
                 os.remove(tmp_path)
             except OSError:
                 pass
+        if job_id and job_id in _job_processes:
+            del _job_processes[job_id]
         try:
             await websocket.close()
         except Exception:
@@ -533,11 +906,21 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     process = None
     tmp_schedule_path = None
+    job_id = None
 
     try:
         user = _get_authenticated_ws_user(websocket)
         if not user:
             await websocket.send_text("Error: Authentication required.")
+            await websocket.close()
+            return
+
+        # Check if user is at active job limit
+        active = _count_user_active_jobs(int(user["id"]))
+        if active >= MAX_JOBS_PER_USER:
+            await websocket.send_text(
+                f"Error: Maximum {MAX_JOBS_PER_USER} concurrent jobs allowed per user."
+            )
             await websocket.close()
             return
 
@@ -568,6 +951,10 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
             return
 
+        # Create job record
+        job_id = _create_job(int(user["id"]), JobType.ENROLL_SCHEDULE, config)
+        _update_job_status(job_id, JobStatus.RUNNING)
+
         # Save the schedule to a temporary file
         tmp_schedule_path = os.path.join(
             "schedules", "tmp", f"schedule_{uuid4().hex}.json"
@@ -576,6 +963,7 @@ async def websocket_endpoint(websocket: WebSocket):
             json.dump(schedule, f, indent=4)
 
         # Send a starting message
+        await websocket.send_text(f"Job {job_id} started.")
         await websocket.send_text("Starting iClassPro automation...")
 
         # Build the command arguments
@@ -597,37 +985,45 @@ async def websocket_endpoint(websocket: WebSocket):
         if complete_transaction:
             cmd_args.append("--complete-transaction")
 
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            *cmd_args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
-        )
+        async with _job_semaphore:
+            process = await asyncio.create_subprocess_exec(
+                sys.executable,
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            )
+            _job_processes[job_id] = process
 
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
+            output_lines = []
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
 
-            # Decode the line and send it to the websocket
-            text_line = line.decode("utf-8").rstrip()
-            await websocket.send_text(text_line)
+                # Decode the line and send it to the websocket
+                text_line = line.decode("utf-8").rstrip()
+                output_lines.append(text_line)
+                await websocket.send_text(text_line)
 
-        await process.wait()
+            await process.wait()
 
-        if process.returncode == 0:
-            await websocket.send_text("Automation completed successfully.")
-        else:
-            # Only send failed message if we didn't deliberately kill it
-            if process.returncode != -15 and process.returncode != -9:
-                await websocket.send_text(
-                    f"Automation failed with exit code {process.returncode}."
+            if process.returncode == 0:
+                _update_job_status(
+                    job_id, JobStatus.COMPLETED, result="\n".join(output_lines)
                 )
+                await websocket.send_text("Automation completed successfully.")
+            else:
+                # Only send failed message if we didn't deliberately kill it
+                error_msg = f"Automation failed with exit code {process.returncode}"
+                _update_job_status(job_id, JobStatus.FAILED, error_msg=error_msg)
+                await websocket.send_text(error_msg)
 
     except WebSocketDisconnect:
-        # Expected behavior when user closes the tab or clicks Stop
-        pass
+        if job_id:
+            _update_job_status(job_id, JobStatus.CANCELLED)
     except Exception as e:
+        if job_id:
+            _update_job_status(job_id, JobStatus.FAILED, error_msg=str(e))
         try:
             await websocket.send_text(f"Error: {str(e)}")
         except Exception:
@@ -644,6 +1040,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 os.remove(tmp_schedule_path)
             except OSError:
                 pass
+        if job_id and job_id in _job_processes:
+            del _job_processes[job_id]
         try:
             await websocket.close()
         except Exception:

@@ -159,8 +159,9 @@
             <h1>iClassPro Enrollment Bot</h1>
             <h2>Automate your class signups</h2>
         </hgroup>
-        <div style="display:flex; justify-content:flex-end; margin-bottom:0.5rem;">
-            <button class="secondary outline" onclick="logoutUser()" style="width:auto; margin-bottom:0;">Log Out</button>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-bottom:0.5rem;">
+            <a href="/settings" role="button" class="secondary outline" style="width:auto; margin-bottom:0;">⚙️ Settings</a>
+            <button class="secondary outline" onclick="logoutUser()" style="width:auto; margin-bottom:0;">🚪 Log Out</button>
         </div>
 
         <!-- Tab navigation -->
@@ -168,6 +169,7 @@
             <button id="tab-btn-config" class="tab-btn active" onclick="switchTab('config', this)">⚙️ Configuration</button>
             <button id="tab-btn-manual" class="tab-btn" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
             <button class="tab-btn" onclick="switchTab('discover', this)">🔍 Discover &amp; Enroll</button>
+            <button class="tab-btn" onclick="switchTab('history', this)">📊 Job History</button>
         </div>
 
         <!-- ===== TAB 1: Configuration & Credentials ===== -->
@@ -376,6 +378,53 @@
                 <div id="enroll-selected-terminal" class="discover-terminal">Waiting to start...</div>
             </section>
         </div><!-- end #tab-discover -->
+
+        <!-- ===== TAB 4: Job History ===== -->
+        <div id="tab-history" class="tab-panel">
+            <section>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4 style="margin: 0;">Recent Job Activity</h4>
+                    <button class="secondary" onclick="refreshJobHistory()" style="width: auto; margin-bottom: 0;">🔄 Refresh</button>
+                </div>
+                <table id="history-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">Type</th>
+                            <th style="width: 100px;">Status</th>
+                            <th style="width: 200px;">Started</th>
+                            <th style="width: 80px;">Duration</th>
+                            <th>Error / Details</th>
+                            <th style="width: 100px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table-body">
+                        <tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">Loading job history...</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section style="margin-top: 2rem;">
+                <h4>Job Statistics</h4>
+                <div class="grid">
+                    <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
+                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Total Jobs</p>
+                        <p id="stat-total" style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: bold;">0</p>
+                    </div>
+                    <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
+                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Successful</p>
+                        <p id="stat-success" style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: bold; color: #28a745;">0</p>
+                    </div>
+                    <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
+                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Failed</p>
+                        <p id="stat-failed" style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: bold; color: #dc3545;">0</p>
+                    </div>
+                    <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
+                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Success Rate</p>
+                        <p id="stat-rate" style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: bold;">-</p>
+                    </div>
+                </div>
+            </section>
+        </div><!-- end #tab-history -->
 
     </main>
 
@@ -754,6 +803,107 @@
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('tab-' + name).classList.add('active');
             if (btn) btn.classList.add('active');
+
+            // Load job history when switching to history tab
+            if (name === 'history') {
+                refreshJobHistory();
+            }
+        }
+
+        // ===== Tab 4: Job History =====
+        async function refreshJobHistory() {
+            try {
+                const response = await fetch('/api/jobs');
+                if (!response.ok) {
+                    console.error('Failed to fetch job history');
+                    return;
+                }
+
+                const jobs = await response.json();
+                const tableBody = document.getElementById('history-table-body');
+                const stats = {
+                    total: jobs.length,
+                    success: jobs.filter(j => j.status === 'completed').length,
+                    failed: jobs.filter(j => j.status === 'failed').length
+                };
+                stats.rate = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0;
+
+                // Update statistics
+                document.getElementById('stat-total').textContent = stats.total;
+                document.getElementById('stat-success').textContent = stats.success;
+                document.getElementById('stat-failed').textContent = stats.failed;
+                document.getElementById('stat-rate').textContent = stats.rate + '%';
+
+                // Populate table
+                if (jobs.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">No jobs yet</td></tr>';
+                    return;
+                }
+
+                tableBody.innerHTML = jobs.map(job => {
+                    const typeEmoji = job.type === 'discover' ? '🔍' : job.type === 'enroll_selected' ? '✅' : '📋';
+                    const statusColor = job.status === 'completed' ? 'green' :
+                                       job.status === 'failed' ? 'red' :
+                                       job.status === 'running' ? 'orange' :
+                                       job.status === 'queued' ? 'blue' : 'gray';
+                    const startDate = job.started_at ? new Date(job.started_at) : null;
+                    const endDate = job.finished_at ? new Date(job.finished_at) : null;
+
+                    let durationStr = '-';
+                    if (startDate && endDate) {
+                        const secs = Math.round((endDate - startDate) / 1000);
+                        durationStr = secs > 60 ? Math.round(secs / 60) + 'm ' + (secs % 60) + 's' : secs + 's';
+                    }
+
+                    const startStr = startDate ? startDate.toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    }) : '-';
+
+                    return `
+                        <tr>
+                            <td>${typeEmoji} ${job.type}</td>
+                            <td><span style="color: ${statusColor}; font-weight: bold; text-transform: capitalize;">${job.status}</span></td>
+                            <td style="font-size: 0.9rem; color: #666;">${startStr}</td>
+                            <td>${durationStr}</td>
+                            <td style="color: #dc3545; font-size: 0.9rem;">${job.error || '-'}</td>
+                            <td>
+                                ${job.status === 'running' || job.status === 'queued' ?
+                                    `<button class="secondary outline" onclick="cancelJob('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">Cancel</button>` :
+                                    `<button class="secondary outline" onclick="viewJobDetails('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">View</button>`
+                                }
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (error) {
+                console.error('Error loading job history:', error);
+                document.getElementById('history-table-body').innerHTML =
+                    '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #dc3545;">Error loading job history</td></tr>';
+            }
+        }
+
+        async function cancelJob(jobId) {
+            if (!confirm('Cancel this job?')) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+                if (response.ok) {
+                    await refreshJobHistory();
+                    alert('Job cancelled');
+                } else {
+                    alert('Failed to cancel job');
+                }
+            } catch (error) {
+                console.error('Error cancelling job:', error);
+                alert('Error cancelling job');
+            }
+        }
+
+        function viewJobDetails(jobId) {
+            alert('Job details view coming soon');
         }
 
         // ===== Tab 2: Discover & Enroll =====

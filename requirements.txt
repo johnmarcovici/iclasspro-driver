@@ -9,3 +9,4 @@ jinja2
 websockets
 pandas
 pyyaml
+cryptography
