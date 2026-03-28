@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iClassPro Dashboard Login</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+</head>
+<body>
+    <main class="container" style="max-width: 560px; margin-top: 3rem;">
+        <hgroup>
+            <h1>iClassPro Enrollment Bot</h1>
+            <h2>Sign in with your iClassPro credentials</h2>
+        </hgroup>
+
+        <article>
+            <label>
+                Email
+                <input type="email" id="email" autocomplete="username" required>
+            </label>
+
+            <label>
+                Password
+                <input type="password" id="password" autocomplete="current-password" required>
+            </label>
+
+            <label>
+                Student ID
+                <input type="number" id="student_id" required>
+            </label>
+
+            <button id="login-button" onclick="login()">Sign In</button>
+            <p id="status" style="margin-top:0.75rem; color:#666;">Enter your credentials to continue.</p>
+        </article>
+    </main>
+
+    <script>
+        async function login() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const student_id = document.getElementById('student_id').value.trim();
+            const status = document.getElementById('status');
+            const button = document.getElementById('login-button');
+
+            if (!email || !password || !student_id) {
+                status.textContent = 'Please provide email, password, and student ID.';
+                status.style.color = '#dc3545';
+                return;
+            }
+
+            button.setAttribute('disabled', 'true');
+            status.textContent = 'Signing in...';
+            status.style.color = '#666';
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, student_id })
+                });
+
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    const message = data.detail || 'Login failed. Please verify your credentials.';
+                    status.textContent = message;
+                    status.style.color = '#dc3545';
+                    button.removeAttribute('disabled');
+                    return;
+                }
+
+                window.location.href = '/';
+            } catch (error) {
+                status.textContent = 'Unable to reach server. Try again.';
+                status.style.color = '#dc3545';
+                button.removeAttribute('disabled');
+            }
+        }
+    </script>
+</body>
+</html>

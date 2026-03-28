@@ -159,6 +159,9 @@
             <h1>iClassPro Enrollment Bot</h1>
             <h2>Automate your class signups</h2>
         </hgroup>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:0.5rem;">
+            <button class="secondary outline" onclick="logoutUser()" style="width:auto; margin-bottom:0;">Log Out</button>
+        </div>
 
         <!-- Tab navigation -->
         <div class="tab-nav">
@@ -197,7 +200,7 @@
                     </label>
                 </div>
                 <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
-                    <input type="checkbox" id="complete_transaction" checked style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
+                    <input type="checkbox" id="complete_transaction" {% if complete_transaction %}checked{% endif %} style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
                     Complete Transaction (uncheck to test enrollment without finalising the purchase)
                 </label>
             </details>
@@ -649,7 +652,16 @@
                     promo_code: document.getElementById('promo_code').value,
                     complete_transaction: document.getElementById('complete_transaction').checked
                 })
-            }).catch(err => console.error('Could not save config to .env:', err));
+            }).catch(err => console.error('Could not save account configuration:', err));
+        }
+
+        async function logoutUser() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (e) {
+                console.error('Logout failed:', e);
+            }
+            window.location.href = '/login';
         }
 
         async function startAutomation() {
@@ -665,10 +677,10 @@
                 Time
             }));
 
-            // Silently persist credentials and config to .env
+            // Silently persist credentials and configuration
             saveConfigToEnv();
 
-            // Silently update the .env file with the last run schedule
+            // Silently persist the default schedule selection
             if (currentScheduleFilename) {
                 try {
                     await fetch('/api/update-default-schedule', {
@@ -677,7 +689,7 @@
                         body: JSON.stringify({ filename: currentScheduleFilename })
                     });
                 } catch (error) {
-                    console.error("Could not update default schedule in .env:", error);
+                    console.error("Could not update default schedule:", error);
                 }
             }
 
@@ -754,7 +766,7 @@
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
 
-            // Silently persist credentials and config to .env
+            // Silently persist credentials and configuration
             saveConfigToEnv();
 
             if (!email || !password || !student_id) {
@@ -928,7 +940,7 @@
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
 
-            // Silently persist credentials and config to .env
+            // Silently persist credentials and configuration
             saveConfigToEnv();
 
             if (!email || !password || !student_id) {
