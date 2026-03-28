@@ -15,6 +15,48 @@ That's it. The first time you run anything from the dashboard, your credentials 
 
 > **First run only:** The setup script will install the required dependencies and browser engine automatically. This takes a minute or two and won't happen again.
 
+## Run Modes
+
+Choose the mode that matches what you are testing.
+
+### 1. Single-User Local (default)
+
+```bash
+./run_dashboard.sh
+```
+
+- URL: `http://localhost:8000`
+- Best for: personal use on one machine
+- Database: SQLite
+
+### 2. Multi-User Local (Docker + PostgreSQL)
+
+```bash
+./run_local.sh
+```
+
+- Dashboard: `http://localhost:8000`
+- pgAdmin: `http://localhost:5050`
+- pgAdmin login: `admin@example.com` / `admin`
+- Best for: validating multi-user behavior before cloud deployment
+- Database: PostgreSQL (containerized)
+
+Helpful commands:
+
+```bash
+./view_logs_local.sh
+./stop_local.sh
+```
+
+### 3. Cloud Build Prep (Google Cloud Run)
+
+```bash
+./build_cloud.sh
+```
+
+- Best for: production deployment
+- Then continue with steps in `CLOUD_DEPLOYMENT.md`
+
 ---
 
 ## Using the Dashboard
