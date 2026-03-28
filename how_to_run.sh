@@ -22,35 +22,31 @@ Choose your setup below:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-2️⃣  MULTI-USER LOCAL (PostgreSQL + Containers)
+2️⃣  MULTI-USER LOCAL (PostgreSQL + Docker)
 
-  ./run_docker_local.sh
+  ./run_local.sh
 
   • Best for: Multi-user testing, real database experience
   • Access: http://localhost:8000
   • Database: PostgreSQL (containerized)
   • Admin UI: http://localhost:5050
   • Setup time: 1-2 minutes
-  • Container runtime: Auto-detects docker/podman/podman-compose
-  • Requirements: Docker OR Podman
+  • Requirements: Docker & docker-compose
 
   To stop:
-  ./stop_docker_local.sh
-
-  Note: Set CONTAINER_CLI=podman or CONTAINER_CLI=docker to override detection
+  ./stop_local.sh
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 3️⃣  CLOUD DEPLOYMENT (Google Cloud Run)
 
-  ./build_docker_cloud.sh
+  ./build_cloud.sh
 
   • Best for: Production, always-on, multi-user cloud hosting
   • Access: Your custom domain (e.g., enrollment.example.com)
   • Database: Google Cloud SQL
   • Setup time: 10-20 minutes
-  • Container runtime: Auto-detects docker/podman
-  • Requirements: Google Cloud account, gcloud CLI, Docker OR Podman
+  • Requirements: Google Cloud account, gcloud CLI, Docker
 
   Then follow the deployment steps in CLOUD_DEPLOYMENT.md
 
@@ -92,12 +88,11 @@ Questions? See:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CONTAINER RUNTIME SUPPORT:
+REQUIREMENTS:
 
-The scripts auto-detect your container runtime. Supported:
-  • docker & docker-compose
-  • podman & podman-compose
-  • Any OCI-compatible container tool
-
+For local & cloud deployments, you need:
+  • Docker Desktop: https://www.docker.com/products/docker-desktop
+  • For cloud: Google Cloud SDK: https://cloud.google.com/sdk/docs/instal
 To override detection, set CONTAINER_CLI:
   CONTAINER_CLI=podman ./run_docker_local.sh
   CONTAINER_CLI=docker ./build_docker_cloud.sh
