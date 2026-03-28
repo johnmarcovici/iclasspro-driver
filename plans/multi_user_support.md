@@ -21,8 +21,8 @@ This works for one household/local user, but creates collisions and data leaks i
 - Keep the UX simple for non-technical users.
 - Preserve current dashboard features while migrating backend architecture.
 - Keep one codebase that supports both:
-	- local self-hosted use on `localhost`
-	- always-on public cloud hosting
+	- local self-hosted use on `localhost` (single-user only)
+	- always-on public cloud hosting (multi-user)
 
 ## Non-Goals (for initial rollout)
 
@@ -157,11 +157,12 @@ This section is intentionally single-path with no alternatives.
 
 ## Local Development and Self-Hosted Flow
 
-The localhost flow remains a first-class path.
+The localhost flow remains a first-class path, but is intentionally single-user.
 
 - Users can still clone and run locally.
-- Local mode uses the same codebase and features as cloud mode.
-- The only differences are infrastructure bindings (local Postgres/SQLite vs Cloud SQL, local secrets vs Secret Manager, local URL vs public domain).
+- Local mode is single-user only because Linux accounts are not shared in this usage model.
+- Cloud mode is the multi-user implementation.
+- Both paths use the same codebase; differences are infrastructure bindings (local Postgres/SQLite vs Cloud SQL, local secrets vs Secret Manager, local URL vs public domain).
 
 ## Scrape-Specific Updates
 
@@ -171,38 +172,34 @@ Because scrape capability was added after the original plan, include these in sc
 - Store discovered class sets per job/session, not globally.
 - Ensure "Enroll Selected" consumes the selected result set for that user/job only.
 
-## Migration Phases
+## Implementation Plan
 
-### Phase 0: Safety Hardening (Immediate)
+Build and ship this as one upgrade with the following workstreams:
 
+1. Core execution safety:
 - Replace shared temp file path with per-run unique path.
 - Add robust cleanup for temp files.
-- Add basic in-process concurrency cap for Playwright runs.
+- Add in-process concurrency cap for Playwright runs.
 
-### Phase 1: Introduce Identity
-
+2. Authentication and sessions:
 - Add dashboard auth using iClassPro credentials only (no separate signup/password).
 - Issue secure session cookies.
 
-### Phase 2: Move State from `.env` to DB
-
+3. Data model and persistence:
 - Add user profile + encrypted iClass credentials and verification metadata.
-- Move schedule storage to DB (or user-scoped JSON directories as short bridge).
+- Move schedule storage to DB (or user-scoped JSON directories as a short bridge).
 - Keep `.env` for server/runtime settings only.
 
-### Phase 3: Job System + Observability
-
+4. Job orchestration and observability:
 - Add `jobs` table and queue-backed runner.
 - Add per-job logs, status endpoints, and clearer failure reasons.
 
-### Phase 4: UX Polish
-
+5. Product UX finish:
 - Add account settings page for defaults.
 - Add "last successful run" insights and retry actions.
 
 ## Rollback and Risk Notes
 
-- Keep a feature flag for "single-user mode" during migration.
 - Plan for dual-read/dual-write during data migration from file schedules.
 - Validate encryption key backup/rotation strategy before production release.
 
