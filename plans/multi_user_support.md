@@ -1,6 +1,6 @@
 # Multi-User Support Plan for iClassPro Enrollment Dashboard
 
-This document updates the original plan to match the current product, including discovery/scrape and selected-class enrollment workflows.
+This document defines the implementation plan for adding multi-user support to the iClassPro Enrollment Dashboard, including discovery/scrape and selected-class enrollment workflows.
 
 ## Current State (Single-User Assumptions)
 
