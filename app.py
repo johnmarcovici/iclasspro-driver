@@ -229,7 +229,22 @@ def _get_user_by_id(user_id: int):
                 user_dict["iclass_password"] = decrypted_pwd
                 return user_dict
             except Exception:
-                return user
+                user_dict = dict(user)
+                # Never expose encrypted blobs to password fields.
+                user_dict["iclass_password"] = ""
+
+                # In local/dev mode, fall back to .env creds for this user.
+                if _is_dev_mode():
+                    env_creds = _get_local_env_credentials()
+                    if (
+                        user_dict.get("iclass_email", "").strip() == env_creds["email"]
+                        and str(user_dict.get("student_id", "")).strip()
+                        == env_creds["student_id"]
+                        and env_creds["password"]
+                    ):
+                        user_dict["iclass_password"] = env_creds["password"]
+
+                return user_dict
         return None
 
 
@@ -246,6 +261,14 @@ def _get_local_env_credentials() -> Dict[str, str]:
         "email": os.getenv("ICLASS_EMAIL", "").strip(),
         "password": os.getenv("ICLASS_PASSWORD", ""),
         "student_id": os.getenv("ICLASS_STUDENT_ID", "").strip(),
+    }
+
+
+def _get_local_env_defaults() -> Dict[str, object]:
+    return {
+        "promo_code": os.getenv("ICLASS_PROMO_CODE", "").strip(),
+        "complete_transaction": os.getenv("ICLASS_COMPLETE_TRANSACTION", "0").lower()
+        in ("1", "true", "yes"),
     }
 
 
@@ -331,6 +354,34 @@ def _require_authenticated_user(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     return user
+
+
+def _apply_dev_env_defaults_to_user(user_id: int):
+    """Seed missing profile defaults from .env in local/dev mode only."""
+    if not _is_dev_mode():
+        return
+
+    defaults = _get_local_env_defaults()
+    now = _utc_now()
+
+    with _get_db_conn() as conn:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            return
+
+        # Only fill promo code if it's currently empty.
+        if not (user["promo_code"] or "").strip() and defaults["promo_code"]:
+            conn.execute(
+                "UPDATE users SET promo_code = ?, updated_at = ? WHERE id = ?",
+                (defaults["promo_code"], now, user_id),
+            )
+
+        # Align initial complete_transaction with env on first login record only.
+        if user["created_at"] == user["updated_at"]:
+            conn.execute(
+                "UPDATE users SET complete_transaction = ?, updated_at = ? WHERE id = ?",
+                (1 if defaults["complete_transaction"] else 0, now, user_id),
+            )
 
 
 def _get_authenticated_ws_user(websocket: WebSocket):
@@ -538,6 +589,7 @@ async def login(request: Request, payload: LoginRequest):
             )
 
     user_id = _upsert_user(email=email, password=password, student_id=student_id)
+    _apply_dev_env_defaults_to_user(user_id)
     request.session["user_id"] = user_id
     return {"message": "Logged in"}
 
