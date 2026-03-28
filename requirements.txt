@@ -10,3 +10,4 @@ websockets
 pandas
 pyyaml
 cryptography
+itsdangerous

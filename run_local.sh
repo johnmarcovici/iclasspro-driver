@@ -19,12 +19,11 @@ echo "iClassPro Dashboard - Local Multi-User Setup"
 echo "================================================"
 echo ""
 
-# Warn if containers already running
+# Stop any existing containers silently to ensure fresh start
 if run_docker_compose ps 2>/dev/null | grep -q "Up"; then
-    echo "⚠️  Containers already running. Use ./stop_local.sh to stop them."
-    read -p "Continue anyway? (y/n) " -n 1 -r
-    echo
-    [[ ! $REPLY =~ ^[Yy]$ ]] && exit 0
+    echo "🔄 Restarting containers..."
+    run_docker_compose down &>/dev/null || true
+    sleep 1
 fi
 
 # Ensure bind-mounted entrypoint is executable before container start.
