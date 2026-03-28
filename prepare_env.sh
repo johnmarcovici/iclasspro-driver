@@ -15,24 +15,34 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Helper function to run docker commands (handles group membership issue)
+# Helper function to run docker commands (automatically handles permissions)
+# First check if docker works without sudo, if not use sudo
+_docker_needs_sudo=
+_check_docker_sudo() {
+    if [ -z "$_docker_needs_sudo" ]; then
+        if docker ps &>/dev/null; then
+            _docker_needs_sudo=0
+        else
+            _docker_needs_sudo=1
+        fi
+    fi
+}
+
 run_docker() {
-    if groups $USER | grep -q docker; then
-        # User is in docker group, run normally
-        docker "$@"
-    else
-        # User not in docker group yet, use sudo
+    _check_docker_sudo
+    if [ "$_docker_needs_sudo" -eq 1 ]; then
         sudo docker "$@"
+    else
+        docker "$@"
     fi
 }
 
 run_docker_compose() {
-    if groups $USER | grep -q docker; then
-        # User is in docker group, run normally
-        docker-compose "$@"
-    else
-        # User not in docker group yet, use sudo
+    _check_docker_sudo
+    if [ "$_docker_needs_sudo" -eq 1 ]; then
         sudo docker-compose "$@"
+    else
+        docker-compose "$@"
     fi
 }
 
