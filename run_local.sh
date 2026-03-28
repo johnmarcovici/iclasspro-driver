@@ -4,10 +4,13 @@
 set -e
 cd "$(dirname "$0")"
 
+# Prepare environment (installs Docker, creates venv, installs Python dependencies)
+source prepare_env.sh
+
 # Require Docker
 if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
     echo "❌ Error: Docker and docker-compose are required"
-    echo "   Download Docker Desktop: https://www.docker.com/products/docker-desktop"
+    echo "   Try running: sudo apt-get install docker.io docker-compose"
     exit 1
 fi
 
