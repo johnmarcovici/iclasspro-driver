@@ -38,13 +38,13 @@ echo ""
 echo "📊 Dashboard: http://localhost:8000"
 echo "🗄️  pgAdmin:  http://localhost:5050 (admin / admin)"
 echo ""
-echo "To see logs:      run_docker_compose logs -f app"
+echo "To see app logs:  ./view_logs_local.sh"
 echo "To stop:          ./stop_local.sh"
 echo ""
 
 # Wait for app to be ready
 sleep 2
-for i in {1..30}; do
+for i in {1..60}; do
     if curl -s http://localhost:8000/login > /dev/null 2>&1; then
         echo "🎉 Everything is running!"
         exit 0
@@ -54,4 +54,8 @@ for i in {1..30}; do
 done
 
 echo ""
-echo "⚠️  Dashboard not responding yet. Check logs with: ./stop_local.sh && ./run_local.sh"
+echo "⚠️  Dashboard is still warming up or failed to start."
+echo "   Expected URLs:"
+echo "   - Dashboard: http://localhost:8000"
+echo "   - pgAdmin:   http://localhost:5050"
+echo "   Troubleshoot with: ./view_logs_local.sh"

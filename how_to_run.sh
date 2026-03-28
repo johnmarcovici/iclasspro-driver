@@ -27,14 +27,17 @@ Choose your setup below:
   ./run_local.sh
 
   • Best for: Multi-user testing, real database experience
-  • Access: http://localhost:8000
+  • Dashboard: http://localhost:8000
+  • Admin UI:  http://localhost:5050
   • Database: PostgreSQL (containerized)
-  • Admin UI: http://localhost:5050
   • Setup time: 1-2 minutes
   • Requirements: Docker & docker-compose
 
   To stop:
   ./stop_local.sh
+
+  To view app logs:
+  ./view_logs_local.sh
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -73,10 +76,11 @@ RECOMMENDATIONS:
      → ./run_dashboard.sh
 
   👥 Team testing (2-5 users):
-     → ./run_docker_local.sh
+     → ./run_local.sh
+     → logs: ./view_logs_local.sh
 
   🌍 Production deployment:
-     → ./build_docker_cloud.sh
+     → ./build_cloud.sh
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -87,14 +91,10 @@ Questions? See:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CONTAINER RUNTIME SUPPORT:
 REQUIREMENTS:
 
 For local & cloud deployments, you need:
-  • Docker Desktop: https://www.docker.com/products/docker-desktop
-  • For cloud: Google Cloud SDK: https://cloud.google.com/sdk/docs/instal
-To override detection, set CONTAINER_CLI:
-  CONTAINER_CLI=podman ./run_docker_local.sh
-  CONTAINER_CLI=docker ./build_docker_cloud.sh
+  • Docker (Engine/Desktop)
+  • For cloud: Google Cloud SDK
 
 EOF
