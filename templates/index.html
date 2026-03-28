@@ -169,7 +169,7 @@
             <button id="tab-btn-config" class="tab-btn active" onclick="switchTab('config', this)">⚙️ Configuration</button>
             <button id="tab-btn-manual" class="tab-btn" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
             <button class="tab-btn" onclick="switchTab('discover', this)">🔍 Discover &amp; Enroll</button>
-            <button class="tab-btn" onclick="switchTab('history', this)">📊 Job History</button>
+            <button class="tab-btn" onclick="switchTab('history', this)">📊 Run History</button>
         </div>
 
         <!-- ===== TAB 1: Configuration & Credentials ===== -->
@@ -379,35 +379,35 @@
             </section>
         </div><!-- end #tab-discover -->
 
-        <!-- ===== TAB 4: Job History ===== -->
+        <!-- ===== TAB 4: Run History ===== -->
         <div id="tab-history" class="tab-panel">
             <section>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                    <h4 style="margin: 0;">Recent Job Activity</h4>
+                    <h4 style="margin: 0;">Recent Activity</h4>
                     <button class="secondary" onclick="refreshJobHistory()" style="width: auto; margin-bottom: 0;">🔄 Refresh</button>
                 </div>
                 <table id="history-table" style="width: 100%;">
                     <thead>
                         <tr>
-                            <th style="width: 120px;">Type</th>
-                            <th style="width: 100px;">Status</th>
-                            <th style="width: 200px;">Started</th>
-                            <th style="width: 80px;">Duration</th>
-                            <th>Error / Details</th>
+                            <th style="width: 140px;">What Ran</th>
+                            <th style="width: 120px;">Result</th>
+                            <th style="width: 200px;">When</th>
+                            <th style="width: 80px;">Time</th>
+                            <th>Notes</th>
                             <th style="width: 100px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="history-table-body">
-                        <tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">Loading job history...</td></tr>
+                        <tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">Loading run history...</td></tr>
                     </tbody>
                 </table>
             </section>
 
             <section style="margin-top: 2rem;">
-                <h4>Job Statistics</h4>
+                <h4>Run Summary</h4>
                 <div class="grid">
                     <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
-                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Total Jobs</p>
+                        <p style="margin: 0; color: #999; font-size: 0.9rem;">Total Runs</p>
                         <p id="stat-total" style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: bold;">0</p>
                     </div>
                     <div style="padding: 1rem; border: 1px solid var(--table-border-color, #dee2e6); border-radius: 6px; text-align: center;">
@@ -810,12 +810,12 @@
             }
         }
 
-        // ===== Tab 4: Job History =====
+        // ===== Tab 4: Run History =====
         async function refreshJobHistory() {
             try {
                 const response = await fetch('/api/jobs');
                 if (!response.ok) {
-                    console.error('Failed to fetch job history');
+                    console.error('Failed to fetch run history');
                     return;
                 }
 
@@ -836,12 +836,30 @@
 
                 // Populate table
                 if (jobs.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">No jobs yet</td></tr>';
+                    tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #999;">No runs yet</td></tr>';
                     return;
                 }
 
                 tableBody.innerHTML = jobs.map(job => {
+                    const typeLabel = job.type === 'discover'
+                        ? 'Discover classes'
+                        : job.type === 'enroll_selected'
+                            ? 'Enroll selected'
+                            : 'Run schedule';
                     const typeEmoji = job.type === 'discover' ? '🔍' : job.type === 'enroll_selected' ? '✅' : '📋';
+
+                    const statusLabel = job.status === 'completed'
+                        ? 'Success'
+                        : job.status === 'failed'
+                            ? 'Failed'
+                            : job.status === 'running'
+                                ? 'In progress'
+                                : job.status === 'queued'
+                                    ? 'Waiting'
+                                    : job.status === 'cancelled'
+                                        ? 'Stopped'
+                                        : job.status;
+
                     const statusColor = job.status === 'completed' ? 'green' :
                                        job.status === 'failed' ? 'red' :
                                        job.status === 'running' ? 'orange' :
@@ -864,46 +882,46 @@
 
                     return `
                         <tr>
-                            <td>${typeEmoji} ${job.type}</td>
-                            <td><span style="color: ${statusColor}; font-weight: bold; text-transform: capitalize;">${job.status}</span></td>
+                            <td>${typeEmoji} ${typeLabel}</td>
+                            <td><span style="color: ${statusColor}; font-weight: bold;">${statusLabel}</span></td>
                             <td style="font-size: 0.9rem; color: #666;">${startStr}</td>
                             <td>${durationStr}</td>
-                            <td style="color: #dc3545; font-size: 0.9rem;">${job.error || '-'}</td>
+                            <td style="color: ${job.error ? '#dc3545' : '#666'}; font-size: 0.9rem;">${job.error || '-'}</td>
                             <td>
                                 ${job.status === 'running' || job.status === 'queued' ?
-                                    `<button class="secondary outline" onclick="cancelJob('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">Cancel</button>` :
-                                    `<button class="secondary outline" onclick="viewJobDetails('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">View</button>`
+                                    `<button class="secondary outline" onclick="cancelJob('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">Stop</button>` :
+                                    `<button class="secondary outline" onclick="viewJobDetails('${job.id}')" style="width: auto; margin-bottom: 0; font-size: 0.8rem; padding: 0.4rem 0.8rem;">Details</button>`
                                 }
                             </td>
                         </tr>
                     `;
                 }).join('');
             } catch (error) {
-                console.error('Error loading job history:', error);
+                console.error('Error loading run history:', error);
                 document.getElementById('history-table-body').innerHTML =
-                    '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #dc3545;">Error loading job history</td></tr>';
+                    '<tr><td colspan="6" style="text-align: center; padding: 2rem; color: #dc3545;">Error loading run history</td></tr>';
             }
         }
 
         async function cancelJob(jobId) {
-            if (!confirm('Cancel this job?')) return;
+            if (!confirm('Stop this run?')) return;
 
             try {
                 const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
                 if (response.ok) {
                     await refreshJobHistory();
-                    alert('Job cancelled');
+                    alert('Run stopped');
                 } else {
-                    alert('Failed to cancel job');
+                    alert('Could not stop run');
                 }
             } catch (error) {
-                console.error('Error cancelling job:', error);
-                alert('Error cancelling job');
+                console.error('Error stopping run:', error);
+                alert('Error stopping run');
             }
         }
 
         function viewJobDetails(jobId) {
-            alert('Job details view coming soon');
+            alert('Detailed run view coming soon');
         }
 
         // ===== Tab 2: Discover & Enroll =====
