@@ -920,8 +920,63 @@
             }
         }
 
-        function viewJobDetails(jobId) {
-            alert('Detailed run view coming soon');
+        async function viewJobDetails(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`);
+                if (!response.ok) {
+                    alert('Could not load run details right now.');
+                    return;
+                }
+
+                const job = await response.json();
+                const typeLabel = job.type === 'discover'
+                    ? 'Discover classes'
+                    : job.type === 'enroll_selected'
+                        ? 'Enroll selected'
+                        : 'Run schedule';
+                const statusLabel = job.status === 'completed'
+                    ? 'Success'
+                    : job.status === 'failed'
+                        ? 'Failed'
+                        : job.status === 'running'
+                            ? 'In progress'
+                            : job.status === 'queued'
+                                ? 'Waiting'
+                                : job.status === 'cancelled'
+                                    ? 'Stopped'
+                                    : job.status;
+
+                const createdAt = job.created_at ? new Date(job.created_at) : null;
+                const startedAt = job.started_at ? new Date(job.started_at) : null;
+                const finishedAt = job.finished_at ? new Date(job.finished_at) : null;
+
+                let durationStr = 'Not available';
+                if (startedAt && finishedAt) {
+                    const secs = Math.max(0, Math.round((finishedAt - startedAt) / 1000));
+                    durationStr = secs > 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+                } else if (startedAt && !finishedAt) {
+                    durationStr = 'Still running';
+                }
+
+                const resultSummary = (job.result || '').trim();
+                const errorSummary = (job.error || '').trim();
+
+                const details = [
+                    `Run: ${typeLabel}`,
+                    `Status: ${statusLabel}`,
+                    `Created: ${createdAt ? createdAt.toLocaleString() : 'Unknown'}`,
+                    `Started: ${startedAt ? startedAt.toLocaleString() : 'Not started'}`,
+                    `Finished: ${finishedAt ? finishedAt.toLocaleString() : 'Not finished'}`,
+                    `Duration: ${durationStr}`,
+                    `Result: ${resultSummary || 'No result message recorded'}`,
+                    `Error: ${errorSummary || 'None'}`,
+                ];
+
+                alert(details.join('\n'));
+            } catch (error) {
+                console.error('Error loading run details:', error);
+                alert('Could not load run details right now.');
+            }
         }
 
         // ===== Tab 2: Discover & Enroll =====

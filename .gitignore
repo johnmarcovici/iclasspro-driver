@@ -5,3 +5,6 @@ __pycache__/
 screenshots/
 *.log
 schedules/tmp/
+app.db
+app.db-*
+*.sqlite3
