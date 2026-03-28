@@ -105,9 +105,14 @@ echo ""
 echo "================================================"
 echo "✅ Environment Ready!"
 echo "================================================"
-echo ""
-echo "You can now run:"
-echo "  • ./run_dashboard.sh      (single-user, no Docker needed)"
-echo "  • ./run_local.sh          (multi-user with PostgreSQL)"
-echo "  • ./build_cloud.sh        (cloud deployment)"
-echo ""
+
+# Only print command suggestions when this file is executed directly.
+# When sourced by run_* scripts, this banner is noisy and confusing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    echo ""
+    echo "You can now run:"
+    echo "  • ./run_dashboard.sh      (single-user, no Docker needed)"
+    echo "  • ./run_local.sh          (multi-user with PostgreSQL)"
+    echo "  • ./build_cloud.sh        (cloud deployment)"
+    echo ""
+fi
