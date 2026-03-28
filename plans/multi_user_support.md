@@ -24,12 +24,6 @@ This works for one household/local user, but creates collisions and data leaks i
 	- local self-hosted use on `localhost` (single-user only)
 	- always-on public cloud hosting (multi-user)
 
-## Non-Goals (for initial rollout)
-
-- Full enterprise RBAC.
-- Multi-tenant billing.
-- Public marketplace integrations.
-
 ## Key Gaps to Address
 
 1. Shared credential store:
