@@ -14,8 +14,7 @@ from email.mime.text import MIMEText
 from urllib.parse import urlparse, urljoin, quote
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 # --- Basic Setup ---
 # Load environment variables from .env file
@@ -130,16 +129,69 @@ class IClassPro:
         self.save_screenshots = save_screenshots
         self.playwright = None
         self.browser = None
+        self.context = None
         self.page = None
         self._last_cart_response = None
+        self._login_email = ""
+        self._login_password = ""
 
     def take_screenshot(self, filename: str, full_page: bool = False):
         """Helper to save a screenshot if --save-screenshots is enabled."""
-        if self.save_screenshots and self.page:
+        if self.save_screenshots and self.page and not self.page.is_closed():
             os.makedirs("screenshots", exist_ok=True)
             self.page.screenshot(
                 path=os.path.join("screenshots", filename), full_page=full_page
             )
+
+    @staticmethod
+    def _is_transient_browser_error(error: Exception) -> bool:
+        message = str(error)
+        return any(
+            marker in message
+            for marker in (
+                "Target crashed",
+                "Page crashed",
+                "Target page, context or browser has been closed",
+                "Browser has been closed",
+            )
+        )
+
+    def _attach_debug_handlers(self) -> None:
+        if self.browser:
+            self.browser.on(
+                "disconnected",
+                lambda: logger.warning("Browser disconnected unexpectedly."),
+            )
+        if self.page:
+            self.page.on("crash", lambda: logger.warning("Page crashed unexpectedly."))
+            self.page.on("close", lambda: logger.warning("Page closed unexpectedly."))
+
+    def _restart_browser(self) -> None:
+        logger.warning("Restarting browser after unexpected Playwright failure...")
+        self.close()
+        self.webdriver()
+
+    def _goto(self, url: str, description: str = "page") -> None:
+        for attempt in range(2):
+            try:
+                if not self.page or self.page.is_closed():
+                    self.webdriver()
+                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                return
+            except PlaywrightError as error:
+                if attempt == 0 and self._is_transient_browser_error(error):
+                    logger.warning(
+                        f"Browser became unstable while opening {description}; retrying once."
+                    )
+                    self._restart_browser()
+                    if (
+                        self._login_email
+                        and self._login_password
+                        and "login?showLogin=1" not in url
+                    ):
+                        self._login_impl(self._login_email, self._login_password)
+                    continue
+                raise
 
     def webdriver(self) -> None:
         """Initialize Playwright and launch a browser instance."""
@@ -152,30 +204,19 @@ class IClassPro:
             headless=headless,
             slow_mo=slow_mo,
             args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--use-gl=swiftshader",
+                "--enable-unsafe-swiftshader",
+                "--disable-features=VizDisplayCompositor",
             ],
         )
-        self.context = self.browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/123.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1280, "height": 800},
-            extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
-        )
-        # Add anti-bot-detection scripts
-        self.context.add_init_script(
-            """
-            Object.defineProperty(navigator, 'webdriver', {get: () => false});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            """
-        )
+        self.context = self.browser.new_context(viewport={"width": 1280, "height": 800})
+        self.context.set_default_timeout(20000)
+        self.context.set_default_navigation_timeout(45000)
         self.page = self.context.new_page()
-        Stealth().apply_stealth_sync(self.page)
+        self._attach_debug_handlers()
         logger.info("Browser launched successfully.")
 
     def _get_cart_item_count(self) -> int:
@@ -212,12 +253,13 @@ class IClassPro:
         logger.warning("Timeout reached while waiting for cart item count.")
         return 0
 
-    def login(self, email: str = "", password: str = "") -> None:
-        """Logs into the iClassPro portal."""
+    def _login_impl(self, email: str = "", password: str = "") -> None:
         logger.info("Navigating to login page...")
         login_url = self.base_url.rstrip("/") + "/login?showLogin=1"
-        self.page.goto(login_url, wait_until="load")
-        self.page.wait_for_timeout(5000)
+        self._goto(login_url, description="login page")
+        # The portal's location picker is timing-sensitive in headless Linux.
+        # Let it fully settle before interacting with it.
+        self.page.wait_for_timeout(12000)
         self.take_screenshot("01_after_goto_login.png")
 
         # Handle "Select a location" modal if it appears
@@ -226,8 +268,8 @@ class IClassPro:
             if location_button.is_visible(timeout=5000):
                 logger.info("Selecting location 'SCAQ'.")
                 location_button.click()
-                self.page.wait_for_timeout(2000)
-                self.page.wait_for_selector('input[type="email"]', timeout=10000)
+                self.page.wait_for_load_state("domcontentloaded")
+                self.page.wait_for_timeout(6000)
         except Exception as e:
             logger.debug(f"Location selection modal not found, proceeding. Error: {e}")
 
@@ -246,10 +288,14 @@ class IClassPro:
         # Fill credentials
         logger.info("Entering login credentials.")
         self.take_screenshot("04_before_login_attempt.png")
-        self.page.locator("#email").fill(email)
-        self.page.locator("#password").fill(password)
+        email_field = self.page.locator("#email")
+        password_field = self.page.locator("#password")
+        email_field.wait_for(state="visible", timeout=15000)
+        password_field.wait_for(state="visible", timeout=15000)
+        email_field.fill(email)
+        password_field.fill(password)
         self.take_screenshot("05_after_filling_credentials.png")
-        self.page.locator("#password").press("Enter")
+        password_field.press("Enter")
 
         # Wait for successful login (e.g., by checking for a dashboard element)
         try:
@@ -259,6 +305,24 @@ class IClassPro:
             logger.error("Login failed. Could not find 'My Account' text after login.")
             self.take_screenshot("login_failure.png")
             raise RuntimeError("Login failed. Please check credentials and portal URL.")
+
+    def login(self, email: str = "", password: str = "") -> None:
+        """Logs into the iClassPro portal."""
+        self._login_email = email
+        self._login_password = password
+
+        for attempt in range(2):
+            try:
+                self._login_impl(email=email, password=password)
+                return
+            except PlaywrightError as error:
+                if attempt == 0 and self._is_transient_browser_error(error):
+                    logger.warning(
+                        "Browser crashed during login; relaunching and retrying once."
+                    )
+                    self._restart_browser()
+                    continue
+                raise
 
     def enroll(
         self,
@@ -318,7 +382,7 @@ class IClassPro:
         student_query = f"&selectedStudents={student_id}"
         booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
 
-        self.page.goto(booking_url, wait_until="load")
+        self._goto(booking_url, description="class search results")
         self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
 
         # Find the link for the class time, waiting for it to appear
@@ -449,7 +513,7 @@ class IClassPro:
         """Navigates to the cart and completes checkout."""
         logger.info("Processing cart...")
         cart_url = self.base_url.rstrip("/") + "/cart"
-        self.page.goto(cart_url, wait_until="load")
+        self._goto(cart_url, description="cart page")
         self.page.wait_for_timeout(5000)  # Extra wait for cart to render fully
 
         self.take_screenshot("cart_final.png", full_page=True)
@@ -526,7 +590,7 @@ class IClassPro:
         for day_idx, day_name in days_to_scrape:
             logger.info(f"Scraping classes for {day_name}...")
             url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
-            self.page.goto(url, wait_until="load")
+            self._goto(url, description=f"{day_name} class list")
             self.page.wait_for_timeout(2000)
             # Scroll to the bottom so any lazily-rendered class cards are added to the DOM
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -722,7 +786,7 @@ class IClassPro:
     def enroll_by_url(self, url: str, class_index: int) -> None:
         """Navigate directly to a class URL and add it to the cart."""
         logger.info(f"Enrolling via direct URL: {url}")
-        self.page.goto(url, wait_until="load")
+        self._goto(url, description="class detail page")
         self.take_screenshot(f"classes_page_url_{class_index}.png", full_page=True)
 
         # Wait for and click "Enroll Now"
@@ -749,12 +813,28 @@ class IClassPro:
 
     def close(self):
         """Safely close the browser and Playwright instances."""
+        if self.context:
+            try:
+                self.context.close()
+            except Exception:
+                pass
         if self.browser:
-            self.browser.close()
-            logger.info("Browser closed.")
+            try:
+                self.browser.close()
+                logger.info("Browser closed.")
+            except Exception:
+                pass
         if self.playwright:
-            self.playwright.stop()
-            logger.info("Playwright stopped.")
+            try:
+                self.playwright.stop()
+                logger.info("Playwright stopped.")
+            except Exception:
+                pass
+
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
 
 
 def main():
