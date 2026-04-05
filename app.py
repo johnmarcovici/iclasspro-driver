@@ -25,6 +25,13 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:
+    psycopg = None
+    dict_row = None
+
 from iclasspro import IClassPro
 
 
@@ -118,6 +125,42 @@ os.makedirs("schedules/users", exist_ok=True)
 
 templates = Jinja2Templates(directory="templates")
 DB_PATH = os.path.join(os.path.dirname(__file__), "app.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
+
+
+def _using_postgres() -> bool:
+    normalized = _normalize_database_url(DATABASE_URL)
+    return normalized.startswith("postgresql://")
+
+
+class _DbConnectionWrapper:
+    def __init__(self, conn, use_postgres: bool):
+        self._conn = conn
+        self._use_postgres = use_postgres
+
+    def __enter__(self):
+        self._conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._conn.__exit__(exc_type, exc_val, exc_tb)
+
+    def execute(self, query: str, params=()):
+        if params is None:
+            params = ()
+        if self._use_postgres:
+            query = query.replace("?", "%s")
+        return self._conn.execute(query, params)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
 
 # Job queue management
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))
@@ -130,47 +173,94 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _get_db_conn() -> sqlite3.Connection:
+def _get_db_conn():
+    if _using_postgres():
+        if psycopg is None:
+            raise RuntimeError(
+                "DATABASE_URL is set for PostgreSQL, but psycopg is not installed. "
+                "Install dependencies again to enable cloud or multi-user Postgres mode."
+            )
+        conn = psycopg.connect(
+            _normalize_database_url(DATABASE_URL),
+            row_factory=dict_row,
+        )
+        return _DbConnectionWrapper(conn, use_postgres=True)
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    return _DbConnectionWrapper(conn, use_postgres=False)
 
 
 def _init_db() -> None:
     with _get_db_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                iclass_email TEXT NOT NULL,
-                iclass_password TEXT NOT NULL,
-                student_id TEXT NOT NULL,
-                promo_code TEXT NOT NULL DEFAULT '',
-                complete_transaction INTEGER NOT NULL DEFAULT 1,
-                default_schedule_filename TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(iclass_email, student_id)
+        if _using_postgres():
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    iclass_email TEXT NOT NULL,
+                    iclass_password TEXT NOT NULL,
+                    student_id TEXT NOT NULL,
+                    promo_code TEXT NOT NULL DEFAULT '',
+                    complete_transaction INTEGER NOT NULL DEFAULT 1,
+                    default_schedule_filename TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(iclass_email, student_id)
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                job_type TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'queued',
-                config TEXT NOT NULL,
-                result TEXT,
-                error_message TEXT,
-                created_at TEXT NOT NULL,
-                started_at TEXT,
-                finished_at TEXT,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    config TEXT NOT NULL,
+                    result TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+                """
             )
-            """
-        )
+        else:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    iclass_email TEXT NOT NULL,
+                    iclass_password TEXT NOT NULL,
+                    student_id TEXT NOT NULL,
+                    promo_code TEXT NOT NULL DEFAULT '',
+                    complete_transaction INTEGER NOT NULL DEFAULT 1,
+                    default_schedule_filename TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(iclass_email, student_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    job_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    config TEXT NOT NULL,
+                    result TEXT,
+                    error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+                """
+            )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)
@@ -700,7 +790,7 @@ async def save_config(request: Request, payload: SaveConfigRequest):
             """,
             (
                 payload.email.strip(),
-                payload.password,
+                _encrypt_password(payload.password),
                 str(payload.student_id).strip(),
                 payload.promo_code,
                 1 if payload.complete_transaction else 0,

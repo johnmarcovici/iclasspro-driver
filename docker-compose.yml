@@ -55,7 +55,7 @@ services:
       DASHBOARD_SESSION_SECRET: "dev-session-secret-change-in-production"
 
       # Encryption key - Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      ENCRYPTION_KEY: "dev-encryption-key-change-in-production"
+      ENCRYPTION_KEY: "6cFDJrE4bWk5sSn9pspP8e5r7mNQxw7Dg4lJ3M5vY8k="
 
       # Development settings
       ENVIRONMENT: "development"

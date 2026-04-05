@@ -11,3 +11,4 @@ pandas
 pyyaml
 cryptography
 itsdangerous
+psycopg[binary]
