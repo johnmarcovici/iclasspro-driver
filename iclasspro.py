@@ -324,6 +324,14 @@ class IClassPro:
                     continue
                 raise
 
+    def _wait_for_class_detail_ready(self, timeout: int = 20000) -> None:
+        """Wait until the class-details view is fully rendered and actionable."""
+        self.page.wait_for_url(re.compile(r"/class-details/"), timeout=timeout)
+        self.page.wait_for_selector(
+            "text=/Class Details|Sessions:|Available for/i", timeout=timeout
+        )
+        self.page.wait_for_timeout(1000)
+
     def enroll(
         self,
         location: str,
@@ -340,19 +348,27 @@ class IClassPro:
             student_id=student_id,
             class_index=class_index,
         )
+        self._wait_for_class_detail_ready()
 
-        # Wait for the "Enroll Now" button to be ready and click it
-        enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
-        enroll_now_button.wait_for(state="visible", timeout=15000)
-        enroll_now_button.click()
+        # `button:has-text('Enroll Now')` should match `Enroll Now!`, but using
+        # the accessible role/name is more robust against DOM/styling changes.
+        enroll_now_button = self.page.get_by_role(
+            "button", name=re.compile(r"Enroll Now!?", re.IGNORECASE)
+        ).first
+        enroll_now_button.scroll_into_view_if_needed(timeout=10000)
+        enroll_now_button.wait_for(state="visible", timeout=20000)
+        enroll_now_button.click(timeout=15000)
 
         # Get the cart count *before* adding the new class
         initial_cart_count = self._get_cart_item_count()
 
         # Wait for the "Add to Cart" button to be ready and click it
-        add_to_cart_button = self.page.locator("button:has-text('Add to Cart')")
-        add_to_cart_button.wait_for(state="visible", timeout=15000)
-        add_to_cart_button.click()
+        add_to_cart_button = self.page.get_by_role(
+            "button", name=re.compile(r"Add to Cart", re.IGNORECASE)
+        ).first
+        add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
+        add_to_cart_button.wait_for(state="visible", timeout=20000)
+        add_to_cart_button.click(timeout=15000)
 
         # Wait for the cart item count to increase
         final_cart_count = self._wait_for_cart_item_count(
@@ -391,14 +407,52 @@ class IClassPro:
             # Wait for at least one to be visible
             class_link.first.wait_for(state="visible", timeout=20000)
 
-            # If there are multiple (e.g., this week and next week), pick the last one
+            # If there are multiple (e.g., this week and next week), pick the last one.
+            # Where possible, resolve the underlying `/class-details/<id>` URL and open
+            # it directly. That's more reliable than depending on SPA click behavior.
             count = class_link.count()
             logger.info(
-                f"Found {count} class link(s) for {timestr}. Clicking the latest one to open details."
+                f"Found {count} class link(s) for {timestr}. Opening the latest matching details view."
             )
-            class_link.last.click()
-            self.page.wait_for_load_state("load")
-            self.page.wait_for_timeout(1000)
+
+            detail_href = class_link.last.evaluate(
+                r"""el => {
+                    const directHref = el.getAttribute('href') || '';
+                    if (/\/class-details\/\d+/.test(directHref)) return directHref;
+
+                    let node = el.parentElement;
+                    while (node && node.tagName !== 'BODY') {
+                        const links = node.querySelectorAll("a[href*='class-details']");
+                        for (const lnk of links) {
+                            const href = lnk.getAttribute('href') || '';
+                            if (/\/class-details\/\d+/.test(href)) return href;
+                        }
+                        node = node.parentElement;
+                    }
+                    return directHref;
+                }"""
+            )
+
+            class_id_match = re.search(r"/class-details/(\d+)", detail_href or "")
+            if class_id_match:
+                filters_json = json.dumps(
+                    {
+                        "q": location,
+                        "students": str(student_id),
+                        "days": str(day_index),
+                    }
+                )
+                class_url = (
+                    f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
+                    f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                )
+                logger.info(f"Opening class detail URL directly: {class_url}")
+                self._goto(class_url, description="class detail page")
+            else:
+                class_link.last.scroll_into_view_if_needed(timeout=10000)
+                class_link.last.click(timeout=15000)
+
+            self._wait_for_class_detail_ready()
         except Exception:
             raise RuntimeError(
                 f"Could not find class at {timestr} within the time limit."
@@ -790,17 +844,24 @@ class IClassPro:
         self.take_screenshot(f"classes_page_url_{class_index}.png", full_page=True)
 
         # Wait for and click "Enroll Now"
-        enroll_now_button = self.page.locator("button:has-text('Enroll Now')")
-        enroll_now_button.wait_for(state="visible", timeout=15000)
-        enroll_now_button.click()
+        self._wait_for_class_detail_ready()
+        enroll_now_button = self.page.get_by_role(
+            "button", name=re.compile(r"Enroll Now!?", re.IGNORECASE)
+        ).first
+        enroll_now_button.scroll_into_view_if_needed(timeout=10000)
+        enroll_now_button.wait_for(state="visible", timeout=20000)
+        enroll_now_button.click(timeout=15000)
 
         # Get initial cart count before adding
         initial_cart_count = self._get_cart_item_count()
 
         # Wait for and click "Add to Cart"
-        add_to_cart_button = self.page.locator("button:has-text('Add to Cart')")
-        add_to_cart_button.wait_for(state="visible", timeout=15000)
-        add_to_cart_button.click()
+        add_to_cart_button = self.page.get_by_role(
+            "button", name=re.compile(r"Add to Cart", re.IGNORECASE)
+        ).first
+        add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
+        add_to_cart_button.wait_for(state="visible", timeout=20000)
+        add_to_cart_button.click(timeout=15000)
 
         # Verify cart count increased
         final_cart_count = self._wait_for_cart_item_count(
