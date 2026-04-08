@@ -749,6 +749,62 @@
         let discoverStopped = false;
         let discoveredClasses = [];
 
+        function normalizeDiscoveredClass(cls) {
+            return {
+                name: cls?.name ? String(cls.name).trim() : '—',
+                Day: cls?.Day ? String(cls.Day).trim() : (cls?.day ? String(cls.day).trim() : ''),
+                Time: cls?.Time ? String(cls.Time).trim() : (cls?.time ? String(cls.time).trim() : ''),
+                Location: cls?.Location ? String(cls.Location).trim() : (cls?.location ? String(cls.location).trim() : ''),
+                Instructor: cls?.Instructor ? String(cls.Instructor).trim() : (cls?.instructor ? String(cls.instructor).trim() : ''),
+                url: cls?.url ? String(cls.url).trim() : ''
+            };
+        }
+
+        function getDiscoveredClassKey(cls) {
+            const normalized = normalizeDiscoveredClass(cls);
+            return [normalized.Day, normalized.Time, normalized.Location, normalized.name]
+                .map(part => String(part || '').trim().toLowerCase())
+                .join('|');
+        }
+
+        function parseDiscoveredClassFromLog(text) {
+            const match = text.match(/Found:\s*([A-Za-z]+)\s+at\s+([0-9:]+\s*[ap]m)\s*[—-]\s*(.+?)(?:\s+\(([^()]+)\))?\s*$/i);
+            if (!match) {
+                return null;
+            }
+
+            const [, day, time, rawName, explicitLocation] = match;
+            const cleanedName = rawName.trim();
+            const fallbackLocation = cleanedName.includes(':') ? cleanedName.split(':')[0].trim() : '';
+
+            return normalizeDiscoveredClass({
+                name: cleanedName,
+                Day: day,
+                Time: time.replace(/\s+/g, '').trim(),
+                Location: (explicitLocation || fallbackLocation).trim(),
+                url: ''
+            });
+        }
+
+        function upsertDiscoveredClass(cls) {
+            const normalized = normalizeDiscoveredClass(cls);
+            const key = getDiscoveredClassKey(normalized);
+            const existingIndex = discoveredClasses.findIndex(existing => getDiscoveredClassKey(existing) === key);
+
+            if (existingIndex >= 0) {
+                discoveredClasses[existingIndex] = { ...discoveredClasses[existingIndex], ...normalized };
+            } else {
+                discoveredClasses.push(normalized);
+            }
+
+            populateClassesTable(discoveredClasses);
+
+            const statusEl = document.getElementById('discover-status');
+            if (statusEl.classList.contains('status-running')) {
+                statusEl.innerText = `Discovering... (${discoveredClasses.length} found)`;
+            }
+        }
+
         function startDiscovery() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
@@ -794,13 +850,19 @@
                 const text = event.data;
                 if (text.startsWith('CLASSES_JSON:')) {
                     try {
-                        discoveredClasses = JSON.parse(text.substring('CLASSES_JSON:'.length));
+                        discoveredClasses = JSON.parse(text.substring('CLASSES_JSON:'.length)).map(normalizeDiscoveredClass);
                         populateClassesTable(discoveredClasses);
                     } catch(e) {
                         appendToDiscoverTerminal('Error parsing class data: ' + e.message);
                     }
                     return;
                 }
+
+                const parsedClass = parseDiscoveredClassFromLog(text);
+                if (parsedClass) {
+                    upsertDiscoveredClass(parsedClass);
+                }
+
                 appendToDiscoverTerminal(text);
             };
 
@@ -809,7 +871,11 @@
                 document.getElementById('discover-button').removeAttribute('disabled');
                 document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
                 const statusEl = document.getElementById('discover-status');
-                if (discoveredClasses.length > 0) {
+                const terminalText = document.getElementById('discover-terminal').innerText;
+                if (terminalText.includes('Discovery failed with exit code') || terminalText.includes('WebSocket error during discovery.') || terminalText.includes('Error:')) {
+                    statusEl.className = 'status-error';
+                    statusEl.innerText = 'Discovery failed';
+                } else if (discoveredClasses.length > 0) {
                     statusEl.className = 'status-success';
                     statusEl.innerText = `Found ${discoveredClasses.length} class(es)`;
                 } else {
