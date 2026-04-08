@@ -332,6 +332,27 @@ class IClassPro:
         )
         self.page.wait_for_timeout(1000)
 
+    def _get_enrollment_issue(self) -> str:
+        """Return a human-readable enrollment issue if the portal is showing one."""
+        try:
+            page_text = self.page.locator("body").inner_text(timeout=5000)
+        except Exception:
+            return ""
+
+        normalized_text = " ".join(page_text.split())
+        patterns = [
+            r"There is a conflicting enrollment for this student\.",
+            r"already enrolled[^.]*\.",
+            r"already in (?:your )?cart[^.]*\.",
+            r"class is full[^.]*\.",
+            r"unable to enroll[^.]*\.",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized_text, re.IGNORECASE)
+            if match:
+                return match.group(0)
+        return ""
+
     def enroll(
         self,
         location: str,
@@ -369,12 +390,20 @@ class IClassPro:
         add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
         add_to_cart_button.wait_for(state="visible", timeout=20000)
         add_to_cart_button.click(timeout=15000)
+        self.page.wait_for_timeout(1500)
+
+        enrollment_issue = self._get_enrollment_issue()
+        if enrollment_issue:
+            raise RuntimeError(enrollment_issue)
 
         # Wait for the cart item count to increase
         final_cart_count = self._wait_for_cart_item_count(
             min_count=initial_cart_count + 1
         )
         if final_cart_count < initial_cart_count + 1:
+            enrollment_issue = self._get_enrollment_issue()
+            if enrollment_issue:
+                raise RuntimeError(enrollment_issue)
             raise RuntimeError("Failed to verify that the class was added to the cart.")
 
         self.take_screenshot(f"after_add_to_cart_{class_index}.png", full_page=True)
@@ -862,12 +891,20 @@ class IClassPro:
         add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
         add_to_cart_button.wait_for(state="visible", timeout=20000)
         add_to_cart_button.click(timeout=15000)
+        self.page.wait_for_timeout(1500)
+
+        enrollment_issue = self._get_enrollment_issue()
+        if enrollment_issue:
+            raise RuntimeError(enrollment_issue)
 
         # Verify cart count increased
         final_cart_count = self._wait_for_cart_item_count(
             min_count=initial_cart_count + 1
         )
         if final_cart_count < initial_cart_count + 1:
+            enrollment_issue = self._get_enrollment_issue()
+            if enrollment_issue:
+                raise RuntimeError(enrollment_issue)
             raise RuntimeError("Failed to verify that the class was added to the cart.")
 
         self.take_screenshot(f"after_add_to_cart_url_{class_index}.png", full_page=True)

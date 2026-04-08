@@ -8,9 +8,9 @@ cd "$(dirname "$0")"
 # Prepare environment (creates venv, installs dependencies)
 source prepare_env.sh
 
-# Kill any existing process on port 8000
+# Stop any existing dashboard instance before launching a fresh one
 echo "Stopping any existing server instances..."
-fuser -k 8000/tcp 2>/dev/null || true
+./stop_dashboard.sh >/dev/null 2>&1 || true
 sleep 1 # Give it a moment to fully shut down
 
 LOG_FILE="/tmp/iclasspro-dashboard.log"
@@ -28,7 +28,7 @@ echo "$SERVER_PID" > "$PID_FILE"
 sleep 2
 if kill -0 "$SERVER_PID" 2>/dev/null; then
     echo "Dashboard is running in the background (PID: $SERVER_PID)."
-    echo "To stop it later, run: kill $(cat "$PID_FILE")"
+    echo "To stop it later, run: ./stop_dashboard.sh"
 else
     echo "Dashboard failed to start. Recent log output:"
     tail -n 50 "$LOG_FILE"
