@@ -17,13 +17,28 @@ fi
 # Activate virtual environment
 source venv/bin/activate
 
-# Install/Update requirements
-echo "Checking dependencies..."
-python3 -m pip install -r requirements.txt &> /dev/null
+REQUIREMENTS_STAMP="venv/.requirements_installed"
+PLAYWRIGHT_STAMP="venv/.playwright_chromium_installed"
+PLAYWRIGHT_CACHE_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 
-# Ensure playwright browser is installed
-echo "Ensuring Playwright browser is ready..."
-python3 -m playwright install chromium &> /dev/null
+# Install or update requirements only when needed
+if [ ! -f "$REQUIREMENTS_STAMP" ] || [ requirements.txt -nt "$REQUIREMENTS_STAMP" ]; then
+    echo "Installing Python dependencies..."
+    python3 -m pip install -r requirements.txt
+    touch "$REQUIREMENTS_STAMP"
+else
+    echo "Dependencies already up to date."
+fi
+
+# Ensure Playwright's Chromium browser is installed only when missing
+if find "$PLAYWRIGHT_CACHE_DIR" -maxdepth 1 -type d -name 'chromium-*' -print -quit 2>/dev/null | grep -q .; then
+    echo "Playwright Chromium already installed."
+    touch "$PLAYWRIGHT_STAMP"
+else
+    echo "Installing Playwright Chromium browser..."
+    python3 -m playwright install chromium
+    touch "$PLAYWRIGHT_STAMP"
+fi
 
 # Create .env if it doesn't exist
 if [ ! -f .env ]; then

@@ -13,10 +13,24 @@ echo "Stopping any existing server instances..."
 fuser -k 8000/tcp 2>/dev/null || true
 sleep 1 # Give it a moment to fully shut down
 
+LOG_FILE="/tmp/iclasspro-dashboard.log"
+PID_FILE="/tmp/iclasspro-dashboard.pid"
+
 # Start the FastAPI web server using uvicorn
 echo "Starting iClassPro Enrollment Dashboard..."
 echo "Access the dashboard at: http://localhost:8000"
-echo "Press Ctrl+C to stop the server."
+echo "Logs: $LOG_FILE"
 
-# Run uvicorn directly
-python3 -m uvicorn app:app --host 0.0.0.0 --port 8000
+nohup python3 -m uvicorn app:app --host 0.0.0.0 --port 8000 > "$LOG_FILE" 2>&1 &
+SERVER_PID=$!
+echo "$SERVER_PID" > "$PID_FILE"
+
+sleep 2
+if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "Dashboard is running in the background (PID: $SERVER_PID)."
+    echo "To stop it later, run: kill $(cat "$PID_FILE")"
+else
+    echo "Dashboard failed to start. Recent log output:"
+    tail -n 50 "$LOG_FILE"
+    exit 1
+fi
