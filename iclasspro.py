@@ -253,30 +253,59 @@ class IClassPro:
         logger.warning("Timeout reached while waiting for cart item count.")
         return 0
 
+    def _wait_for_login_ui(self, timeout: int = 15000) -> str:
+        """Wait until the login form or a portal modal becomes interactable."""
+        deadline = time.time() + timeout / 1000.0
+        while time.time() < deadline:
+            try:
+                if self.page.locator("#email").is_visible():
+                    return "credentials"
+            except Exception:
+                pass
+
+            try:
+                if self.page.locator("span:has-text('SCAQ')").first.is_visible():
+                    return "location"
+            except Exception:
+                pass
+
+            try:
+                if self.page.locator("button:has-text('Yes')").first.is_visible():
+                    return "customer"
+            except Exception:
+                pass
+
+            self.page.wait_for_timeout(500)
+
+        return ""
+
     def _login_impl(self, email: str = "", password: str = "") -> None:
         logger.info("Navigating to login page...")
         login_url = self.base_url.rstrip("/") + "/login?showLogin=1"
         self._goto(login_url, description="login page")
-        # The portal's location picker is timing-sensitive in headless Linux.
-        # Let it fully settle before interacting with it.
-        self.page.wait_for_timeout(12000)
+        logger.info("Login page loaded. Waiting for portal prompts...")
+        ui_state = self._wait_for_login_ui(timeout=15000)
+        if not ui_state:
+            logger.warning(
+                "Login UI is taking longer than expected; proceeding with direct field lookup."
+            )
         self.take_screenshot("01_after_goto_login.png")
 
         # Handle "Select a location" modal if it appears
         try:
-            location_button = self.page.locator("span:has-text('SCAQ')")
-            if location_button.is_visible(timeout=5000):
+            location_button = self.page.locator("span:has-text('SCAQ')").first
+            if location_button.is_visible():
                 logger.info("Selecting location 'SCAQ'.")
                 location_button.click()
                 self.page.wait_for_load_state("domcontentloaded")
-                self.page.wait_for_timeout(6000)
+                self._wait_for_login_ui(timeout=8000)
         except Exception as e:
             logger.debug(f"Location selection modal not found, proceeding. Error: {e}")
 
         # Handle "Are you a current customer?" modal
         try:
-            yes_button = self.page.locator("button:has-text('Yes')")
-            if yes_button.is_visible(timeout=5000):
+            yes_button = self.page.locator("button:has-text('Yes')").first
+            if yes_button.is_visible():
                 logger.info("Clicking 'Yes' on 'current customer' modal.")
                 self.take_screenshot("02_before_clicking_yes.png")
                 yes_button.click()
