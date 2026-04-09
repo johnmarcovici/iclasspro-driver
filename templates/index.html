@@ -975,6 +975,10 @@
             return d.innerHTML;
         }
 
+        function isNormalWebSocketClose(event) {
+            return !event || event.code === 1000 || event.code === 1001;
+        }
+
         function selectAllClasses() {
             document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = true; });
         }
@@ -986,6 +990,8 @@
         // ===== Enroll selected discovered classes =====
         let enrollSelectedWs = null;
         let enrollSelectedStopped = false;
+        let enrollSelectedHadMessage = false;
+        let enrollSelectedTransportError = false;
 
         function startSelectedEnrollment() {
             const email = document.getElementById("email").value;
@@ -1019,6 +1025,8 @@
             document.getElementById('enroll-selected-terminal').innerHTML = '';
             document.getElementById('enroll-selected-output').style.display = 'block';
             enrollSelectedStopped = false;
+            enrollSelectedHadMessage = false;
+            enrollSelectedTransportError = false;
 
             const statusEl = document.getElementById('enroll-selected-status');
             statusEl.className = 'status-running';
@@ -1041,33 +1049,39 @@
             };
 
             enrollSelectedWs.onmessage = function(event) {
+                enrollSelectedHadMessage = true;
                 appendToEnrollSelectedTerminal(event.data);
             };
 
-            enrollSelectedWs.onclose = function() {
+            enrollSelectedWs.onclose = function(event) {
                 if (enrollSelectedStopped) return;
                 document.getElementById('enroll-selected-button').removeAttribute('disabled');
                 document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
                 const statusEl = document.getElementById('enroll-selected-status');
-                const content = document.getElementById('enroll-selected-terminal').innerHTML;
-                if (content.includes('successfully')) {
-                    statusEl.className = 'status-success';
-                    statusEl.innerText = 'Completed';
-                } else if (content.includes('failed') || content.includes('Error')) {
+                const content = document.getElementById('enroll-selected-terminal').innerText || '';
+
+                if (!isNormalWebSocketClose(event) && !content.includes('Connection to enrollment stream')) {
+                    appendToEnrollSelectedTerminal(`Connection to enrollment stream closed unexpectedly (code ${event.code}).`);
+                }
+
+                if (content.includes('failed') || content.includes('Error')) {
                     statusEl.className = 'status-error';
                     statusEl.innerText = 'Failed';
+                } else if (content.includes('successfully')) {
+                    statusEl.className = 'status-success';
+                    statusEl.innerText = 'Completed';
+                } else if (!isNormalWebSocketClose(event) || (enrollSelectedTransportError && !enrollSelectedHadMessage)) {
+                    statusEl.className = 'status-error';
+                    statusEl.innerText = 'Connection lost';
                 } else {
                     statusEl.className = 'status-idle';
                     statusEl.innerText = 'Done';
                 }
             };
 
-            enrollSelectedWs.onerror = function() {
-                appendToEnrollSelectedTerminal('WebSocket error during enrollment.');
-                document.getElementById('enroll-selected-status').className = 'status-error';
-                document.getElementById('enroll-selected-status').innerText = 'Error';
-                document.getElementById('enroll-selected-button').removeAttribute('disabled');
-                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
+            enrollSelectedWs.onerror = function(event) {
+                enrollSelectedTransportError = true;
+                console.error('Enrollment websocket transport error.', event);
             };
         }
 

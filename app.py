@@ -246,6 +246,7 @@ async def websocket_scrape(websocket: WebSocket):
 async def websocket_enroll_selected(websocket: WebSocket):
     await websocket.accept()
     process = None
+    saw_failure_output = False
 
     try:
         config_data = await websocket.receive_text()
@@ -307,12 +308,22 @@ async def websocket_enroll_selected(websocket: WebSocket):
             if not line:
                 break
             text_line = line.decode("utf-8").rstrip()
+            lowered_line = text_line.lower()
+            if (
+                "failed to enroll" in lowered_line
+                or "critical error" in lowered_line
+                or "runtimeerror" in lowered_line
+            ):
+                saw_failure_output = True
             await websocket.send_text(text_line)
 
         await process.wait()
 
         if process.returncode == 0:
-            await websocket.send_text("Enrollment completed successfully.")
+            if saw_failure_output:
+                await websocket.send_text("Enrollment finished with some failures.")
+            else:
+                await websocket.send_text("Enrollment completed successfully.")
         elif process.returncode not in (-15, -9):
             await websocket.send_text(
                 f"Enrollment failed with exit code {process.returncode}."
