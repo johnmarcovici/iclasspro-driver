@@ -210,10 +210,17 @@ async def websocket_scrape(websocket: WebSocket):
         )
 
         while True:
-            line = await process.stdout.readline()
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=10)
+            except asyncio.TimeoutError:
+                if process.returncode is not None:
+                    break
+                await websocket.send_text("Still working on discovery...")
+                continue
+
             if not line:
                 break
-            text_line = line.decode("utf-8").rstrip()
+            text_line = line.decode("utf-8", errors="replace").rstrip()
             await websocket.send_text(text_line)
 
         await process.wait()
@@ -304,10 +311,17 @@ async def websocket_enroll_selected(websocket: WebSocket):
         )
 
         while True:
-            line = await process.stdout.readline()
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=10)
+            except asyncio.TimeoutError:
+                if process.returncode is not None:
+                    break
+                await websocket.send_text("Still working on enrollment...")
+                continue
+
             if not line:
                 break
-            text_line = line.decode("utf-8").rstrip()
+            text_line = line.decode("utf-8", errors="replace").rstrip()
             lowered_line = text_line.lower()
             if (
                 "failed to enroll" in lowered_line
@@ -414,12 +428,19 @@ async def websocket_endpoint(websocket: WebSocket):
         )
 
         while True:
-            line = await process.stdout.readline()
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=10)
+            except asyncio.TimeoutError:
+                if process.returncode is not None:
+                    break
+                await websocket.send_text("Still working on automation...")
+                continue
+
             if not line:
                 break
 
             # Decode the line and send it to the websocket
-            text_line = line.decode("utf-8").rstrip()
+            text_line = line.decode("utf-8", errors="replace").rstrip()
             await websocket.send_text(text_line)
 
         await process.wait()

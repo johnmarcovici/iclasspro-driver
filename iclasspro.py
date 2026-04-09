@@ -506,15 +506,40 @@ class IClassPro:
                 )
                 logger.info(f"Opening class detail URL directly: {class_url}")
                 self._goto(class_url, description="class detail page")
-            else:
-                class_link.last.scroll_into_view_if_needed(timeout=10000)
-                class_link.last.click(timeout=15000)
+                self._wait_for_class_detail_ready()
+                return
 
-            self._wait_for_class_detail_ready()
-        except Exception:
+            last_error = None
+            for attempt_label, use_force, use_js in (
+                ("standard click", False, False),
+                ("forced click", True, False),
+                ("javascript click", False, True),
+            ):
+                try:
+                    logger.info(
+                        f"Opening class detail via {attempt_label} for {daystr} at {timestr}."
+                    )
+                    class_link.last.scroll_into_view_if_needed(timeout=10000)
+                    if use_js:
+                        class_link.last.evaluate("(el) => el.click()")
+                    else:
+                        class_link.last.click(timeout=15000, force=use_force)
+                    self._wait_for_class_detail_ready(timeout=10000)
+                    return
+                except Exception as attempt_error:
+                    last_error = attempt_error
+                    logger.warning(
+                        f"Class detail did not open via {attempt_label}; retrying if possible."
+                    )
+                    self._goto(booking_url, description="class search results")
+                    class_link = self.page.locator(f"a:has-text('at {timestr}')")
+                    class_link.first.wait_for(state="visible", timeout=10000)
+
+            raise last_error or RuntimeError("Class detail page did not open.")
+        except Exception as error:
             raise RuntimeError(
-                f"Could not find class at {timestr} within the time limit."
-            )
+                f"Could not open class details for {daystr} at {timestr} in {location}: {error}"
+            ) from error
 
     def _extract_detail_field(self, label: str) -> str:
         """Extract a labeled field value from the class detail page."""
