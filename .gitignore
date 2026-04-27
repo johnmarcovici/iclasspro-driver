@@ -5,3 +5,5 @@ __pycache__/
 screenshots/
 *.log
 schedules/tmp/
+storage_state.json
+run_report.json

@@ -6,95 +6,70 @@
     <title>iClassPro Enrollment Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
     <style>
-        #terminal {
-            background-color: #1e1e1e;
-            color: #d4d4d4;
-            padding: 1rem;
-            border-radius: 5px;
-            height: 400px;
-            overflow-x: auto;
-            overflow-y: auto;
-            font-family: monospace;
-            white-space: pre;
-            margin-top: 1rem;
+        :root {
+            --sidebar-width: 320px;
+            --run-panel-height: 280px;
         }
-        .status-idle { color: #6c757d; }
-        .status-running { color: #ffc107; font-weight: bold;}
-        .status-success { color: #28a745; font-weight: bold;}
-        .status-error { color: #dc3545; font-weight: bold;}
 
-        .schedule-row {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-        .schedule-row select, .schedule-row input {
-            margin-bottom: 0;
-            width: 100%;
-        }
-        .schedule-row .day-input {
-            flex: 1;
-        }
-        .delete-btn {
-            width: auto;
-            margin-bottom: 0;
-            background-color: #dc3545;
-            border-color: #dc3545;
-            padding: 0.5rem 1rem;
-        }
-        .delete-btn:hover {
-            background-color: #c82333;
-            border-color: #bd2130;
-        }
-        .status-badge {
-            display: inline-block;
-            width: 1rem;
-            height: 1rem;
-            border-radius: 50%;
-            background-color: #ccc;
-        }
-        .status-processing { background-color: #ffc107; }
-        .status-done { background-color: #28a745; }
-        .status-failed { background-color: #dc3545; }
-
-        /* Password eye toggle styling */
-        .password-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-        .password-toggle {
-            position: absolute;
-            right: 10px;
-            cursor: pointer;
-            user-select: none;
-            background: none;
-            border: none;
-            padding: 0;
+        html, body {
+            height: 100%;
             margin: 0;
-            z-index: 10;
-            color: #6c757d;
-            opacity: 0.6;
+        }
+
+        .app-shell {
             display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .password-toggle:hover {
-            opacity: 1;
+            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
         }
 
-        .clear-btn:hover {
-            background-color: #dc3545 !important;
-            color: white !important;
+        .sidebar {
+            width: var(--sidebar-width);
+            min-width: var(--sidebar-width);
+            border-right: 1px solid var(--muted-border-color);
+            padding: 1rem 1.25rem;
+            overflow-y: auto;
+            background: var(--card-background-color, #fff);
         }
 
-        /* Tab navigation */
+        .sidebar h2 {
+            margin: 0 0 0.25rem 0;
+            font-size: 1.1rem;
+        }
+        .sidebar h2 small {
+            display: block;
+            font-weight: normal;
+            color: var(--muted-color);
+            font-size: 0.8rem;
+            margin-top: 0.1rem;
+        }
+
+        .sidebar details { margin-top: 1rem; }
+        .sidebar details summary { font-weight: 600; cursor: pointer; }
+
+        .sidebar .grid { display: block; }
+        .sidebar .grid label { display: block; margin-bottom: 0.6rem; }
+        .sidebar input, .sidebar select { margin-bottom: 0.4rem; }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            height: 100vh;
+        }
+
+        .page-header {
+            padding: 0.75rem 1.5rem 0;
+            border-bottom: 1px solid var(--muted-border-color);
+            background: var(--background-color);
+        }
+        .page-header h1 { margin: 0 0 0.25rem 0; font-size: 1.3rem; }
+        .page-header .subtitle { color: var(--muted-color); font-size: 0.9rem; margin-bottom: 0.5rem; }
+
         .tab-nav {
             display: flex;
             gap: 0;
-            border-bottom: 2px solid var(--primary);
-            margin-bottom: 1.5rem;
         }
         .tab-btn {
             background: none;
@@ -103,24 +78,146 @@
             border-radius: 0;
             color: var(--muted-color);
             cursor: pointer;
-            font-size: 1rem;
-            margin-bottom: -2px;
-            padding: 0.6rem 1.2rem;
+            font-size: 0.95rem;
+            padding: 0.5rem 1rem;
             width: auto;
+            margin: 0;
         }
-        .tab-btn:hover {
-            background: none;
-            color: var(--primary);
-        }
+        .tab-btn:hover { background: none; color: var(--primary); }
         .tab-btn.active {
             border-bottom-color: var(--primary);
             color: var(--primary);
             font-weight: bold;
         }
+
+        .tab-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.25rem 1.5rem;
+            min-height: 0;
+        }
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
 
-        /* Discovered-classes table */
+        .run-panel {
+            border-top: 2px solid var(--primary);
+            padding: 0.75rem 1.5rem;
+            background: var(--card-background-color, #fff);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .run-panel-bar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .run-panel-bar .spacer { flex: 1; }
+        .run-panel-bar .stop-btn {
+            margin: 0;
+            border-color: #dc3545;
+            color: #dc3545;
+            width: auto;
+        }
+
+        #terminal {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 0.75rem;
+            border-radius: 5px;
+            height: 200px;
+            overflow-x: auto;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre;
+            margin: 0;
+        }
+
+        .status-idle { color: #6c757d; }
+        .status-running { color: #ffc107; font-weight: bold;}
+        .status-success { color: #28a745; font-weight: bold;}
+        .status-error { color: #dc3545; font-weight: bold;}
+
+        /* Schedule editor */
+        .schedule-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-bottom: 0.4rem;
+        }
+        .schedule-row select, .schedule-row input {
+            margin-bottom: 0;
+            width: 100%;
+        }
+        .schedule-row .day-input { flex: 1; }
+        .delete-btn {
+            width: auto;
+            margin-bottom: 0;
+            background-color: #dc3545;
+            border-color: #dc3545;
+            padding: 0.4rem 0.75rem;
+        }
+        .delete-btn:hover { background-color: #c82333; border-color: #bd2130; }
+
+        .status-badge {
+            display: inline-block;
+            width: 0.9rem;
+            height: 0.9rem;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+        .status-processing { background-color: #ffc107; }
+        .status-done { background-color: #28a745; }
+        .status-failed { background-color: #dc3545; }
+
+        /* Password eye toggle */
+        .password-container { position: relative; display: flex; align-items: center; }
+        .password-toggle {
+            position: absolute; right: 8px; cursor: pointer; user-select: none;
+            background: none; border: none; padding: 0; margin: 0; z-index: 10;
+            color: #6c757d; opacity: 0.6; display: flex; align-items: center; justify-content: center;
+        }
+        .password-toggle:hover { opacity: 1; }
+
+        .clear-btn:hover { background-color: #dc3545 !important; color: white !important; }
+
+        /* Saved schedules list */
+        .schedules-list { list-style: none; padding: 0; margin: 0.5rem 0 0 0; }
+        .schedules-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.4rem;
+            border-radius: 4px;
+        }
+        .schedules-list li:hover { background: rgba(0,0,0,0.04); }
+        .schedules-list li.is-default { background: rgba(255, 193, 7, 0.12); }
+        .schedules-list li button {
+            background: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            width: auto;
+        }
+        .schedules-list li .name-btn {
+            flex: 1;
+            text-align: left;
+            color: var(--color);
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        .schedules-list li .name-btn:hover { color: var(--primary); }
+        .schedules-list li .star-btn {
+            color: #c0c0c0;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .schedules-list li.is-default .star-btn { color: #ffc107; }
+        .schedules-list li .star-btn:hover { color: #ffc107; }
+
+        /* Discovery results table */
         #discovered-classes-table {
             width: 100%;
             border-collapse: collapse;
@@ -139,39 +236,36 @@
             margin: 0;
             cursor: pointer;
         }
-        .discover-terminal {
-            background-color: #1e1e1e;
-            color: #d4d4d4;
-            padding: 1rem;
-            border-radius: 5px;
-            height: 250px;
-            overflow-x: auto;
-            overflow-y: auto;
-            font-family: monospace;
-            white-space: pre;
-            margin-top: 0.5rem;
+
+        /* Mobile: sidebar becomes a top drawer */
+        .sidebar-toggle {
+            display: none;
+            background: none;
+            border: 1px solid var(--muted-border-color);
+            padding: 0.4rem 0.75rem;
+            border-radius: 4px;
+            margin: 0.5rem 0;
+            width: auto;
+        }
+        @media (max-width: 900px) {
+            .app-shell { flex-direction: column; height: auto; overflow: visible; }
+            .sidebar { width: 100%; min-width: 0; max-height: 60vh; border-right: none; border-bottom: 1px solid var(--muted-border-color); }
+            .main { height: auto; }
+            .tab-content { overflow-y: visible; }
         }
     </style>
 </head>
 <body>
-    <main class="container">
-        <hgroup>
-            <h1>iClassPro Enrollment Bot</h1>
-            <h2>Automate your class signups</h2>
-        </hgroup>
+    <div class="app-shell">
+        <!-- ===== Sidebar: Configuration + Saved Schedules ===== -->
+        <aside class="sidebar">
+            <h2>iClassPro
+                <small>Enrollment Dashboard</small>
+            </h2>
 
-        <!-- Tab navigation -->
-        <div class="tab-nav">
-            <button id="tab-btn-config" class="tab-btn active" onclick="switchTab('config', this)">⚙️ Configuration</button>
-            <button id="tab-btn-manual" class="tab-btn" onclick="switchTab('manual', this)">📋 Manual Enrollment</button>
-            <button class="tab-btn" onclick="switchTab('discover', this)">🔍 Discover &amp; Enroll</button>
-        </div>
-
-        <!-- ===== TAB 1: Configuration & Credentials ===== -->
-        <div id="tab-config" class="tab-panel active">
             <details open>
-                <summary><strong>Configuration & Credentials</strong></summary>
-                <div class="grid">
+                <summary>Configuration</summary>
+                <div class="grid" style="margin-top: 0.5rem;">
                     <label>
                         Email
                         <input type="email" id="email" value="{{ email }}" required>
@@ -181,242 +275,283 @@
                         <div class="password-container">
                             <input type="password" id="password" value="{{ password }}" required>
                             <button type="button" class="password-toggle" onclick="togglePassword()" title="Toggle password visibility">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                             </button>
                         </div>
                     </label>
-                </div>
-                <div class="grid">
                     <label>
                         Student ID
                         <input type="number" id="student_id" value="{{ student_id }}" required>
                     </label>
                     <label>
-                        Promo Code (Optional)
+                        Promo Code (optional)
                         <input type="text" id="promo_code" value="{{ promo_code }}">
                     </label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
+                        <input type="checkbox" id="complete_transaction" checked style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
+                        <span style="font-size: 0.9rem;">Complete Transaction</span>
+                    </label>
+                    <small style="color: var(--muted-color); font-size: 0.8rem;">
+                        Uncheck to dry-run without finalising the purchase.
+                    </small>
                 </div>
-                <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem;">
-                    <input type="checkbox" id="complete_transaction" checked style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
-                    Complete Transaction (uncheck to test enrollment without finalising the purchase)
-                </label>
             </details>
-        </div><!-- end #tab-config -->
 
-        <!-- ===== TAB 2: Manual Enrollment ===== -->
-        <div id="tab-manual" class="tab-panel">
+            <details open>
+                <summary>Saved Schedules</summary>
+                <ul id="schedules-list" class="schedules-list"></ul>
+                <small style="color: var(--muted-color); font-size: 0.8rem; display: block; margin-top: 0.5rem;">
+                    Click a name to load it. Click the star to set it as the default schedule.
+                </small>
+            </details>
+        </aside>
 
-        <!-- Schedule Editor -->
-        <details open>
-            <summary><strong>Class Schedule</strong></summary>
+        <!-- ===== Main pane ===== -->
+        <main class="main">
+            <header class="page-header">
+                <h1>Enrollment Dashboard</h1>
+                <p class="subtitle">Automate your iClassPro signups</p>
+                <nav class="tab-nav">
+                    <button id="tab-btn-manual" class="tab-btn active" onclick="switchTab('manual', this)">Manual Enrollment</button>
+                    <button id="tab-btn-discover" class="tab-btn" onclick="switchTab('discover', this)">Discover &amp; Enroll</button>
+                </nav>
+            </header>
 
-            <div class="grid" style="margin-bottom: 1rem; align-items: end;">
-                <label>
-                    Load Schedule
-                    <div style="display: flex; gap: 0.5rem;">
-                        <select id="schedule-select" style="margin-bottom: 0;" onchange="loadSchedule()">
-                            <option value="">Select a schedule...</option>
-                            {% for schedule_file in schedules_list %}
-                            <option value="{{ schedule_file }}" {% if schedule_file == default_schedule_filename %}selected{% endif %}>{{ schedule_file }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </label>
-                <label>
-                    Save Schedule
-                    <div style="display: flex; gap: 0.5rem;">
-                        <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
-                        <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
-                    </div>
-                </label>
-            </div>
+            <section class="tab-content">
+                <!-- ===== Tab: Manual Enrollment ===== -->
+                <div id="tab-manual" class="tab-panel active">
+                    <details open>
+                        <summary><strong>Class Schedule</strong></summary>
 
-            <div id="schedule-container">
-                <!-- Schedule rows will be injected here -->
-            </div>
-            <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
-                <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
-            </div>
-        </details>
-
-        <section style="margin-top: 2rem;">
-            <div class="grid">
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <button id="run-button" onclick="startAutomation()" style="margin-bottom: 0;">▶ Run Enrollment Schedule</button>
-                    <button id="stop-button" class="secondary outline" onclick="stopAutomation()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;" disabled>⏹ Stop</button>
-                </div>
-            </div>
-            <p style="margin-top: 1rem;">Status: <span id="status-indicator" class="status-idle">Idle</span></p>
-        </section>
-
-        <section>
-            <h4>Live Output</h4>
-            <div id="terminal">Waiting to start...</div>
-        </section>
-
-        </div><!-- end #tab-manual -->
-
-        <!-- ===== TAB 3: Discover & Enroll ===== -->
-        <div id="tab-discover" class="tab-panel">
-
-            <!-- Discovery filters -->
-            <section style="margin-top:0;">
-                <details open>
-                    <summary><strong>Filters</strong> <span style="font-weight:normal;font-size:0.85em;color:#888;">(leave all unchecked to scrape everything)</span></summary>
-                    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
-                        <div>
-                            <strong>Days</strong>
-                            <div id="scrape-days-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Sunday"> Sun</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Monday"> Mon</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Tuesday"> Tue</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Wednesday"> Wed</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Thursday"> Thu</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Friday"> Fri</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Saturday"> Sat</label>
-                            </div>
+                        <div class="grid" style="margin-bottom: 1rem; align-items: end;">
+                            <label>
+                                Save Schedule
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
+                                    <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
+                                </div>
+                            </label>
                         </div>
-                        <div>
-                            <strong>Locations</strong>
-                            <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                                {% for loc in locations %}
-                                <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="{{ loc }}"> {{ loc }}</label>
-                                {% endfor %}
-                            </div>
+
+                        <div id="schedule-container">
+                            <!-- Schedule rows will be injected here -->
                         </div>
-                    </div>
-                </details>
-            </section>
+                        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                            <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
+                            <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
+                        </div>
+                    </details>
 
-            <!-- Discovery controls -->
-            <section>
-                <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem;">
-                    <input type="checkbox" id="deep-scrape-cb" style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
-                    <span>Get detailed links & instructor info <span style="font-weight:normal;font-size:0.85em;color:#888;">(slower)</span></span>
-                </label>
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0;">🔍 Discover Available Classes</button>
-                    <button id="stop-discover-button" class="secondary outline" onclick="stopDiscovery()" style="margin-bottom:0; border-color:#dc3545; color:#dc3545;" disabled>⏹ Stop</button>
-                </div>
-                <p style="margin-top:0.75rem;">Status: <span id="discover-status" class="status-idle">Idle</span></p>
-            </section>
-
-            <section>
-                <h4>Discovery Output</h4>
-                <div id="discover-terminal" class="discover-terminal">Waiting to start...</div>
-            </section>
-
-            <!-- Discovered classes table (hidden until results arrive) -->
-            <section id="discovered-section" style="display:none;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                    <h4 style="margin:0;">Available Classes</h4>
-                    <div style="display:flex; gap:0.5rem;">
-                        <button class="secondary" onclick="selectAllClasses()" style="width:auto; margin-bottom:0;">Select All</button>
-                        <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect All</button>
-                    </div>
+                    <section style="margin-top: 1.5rem;">
+                        <button id="run-button" onclick="startAutomation()" style="margin-bottom: 0;">▶ Run Enrollment Schedule</button>
+                    </section>
                 </div>
 
-                <details open style="margin-bottom:0.9rem; padding:0.75rem; border:1px solid var(--table-border-color, #dee2e6); border-radius:6px;">
-                    <summary><strong>Filter Displayed Results</strong></summary>
-                    <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
-                        <div>
-                            <strong>Days</strong>
-                            <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Sunday" onchange="applyDiscoveredTableFilters()"> Sun</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Monday" onchange="applyDiscoveredTableFilters()"> Mon</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Tuesday" onchange="applyDiscoveredTableFilters()"> Tue</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Wednesday" onchange="applyDiscoveredTableFilters()"> Wed</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Thursday" onchange="applyDiscoveredTableFilters()"> Thu</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Friday" onchange="applyDiscoveredTableFilters()"> Fri</label>
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Saturday" onchange="applyDiscoveredTableFilters()"> Sat</label>
+                <!-- ===== Tab: Discover & Enroll ===== -->
+                <div id="tab-discover" class="tab-panel">
+                    <details open>
+                        <summary><strong>Filters</strong> <span style="font-weight:normal;font-size:0.85em;color:#888;">(leave all unchecked to scrape everything)</span></summary>
+                        <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
+                            <div>
+                                <strong>Days</strong>
+                                <div id="scrape-days-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Sunday"> Sun</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Monday"> Mon</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Tuesday"> Tue</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Wednesday"> Wed</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Thursday"> Thu</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Friday"> Fri</label>
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-day-cb" value="Saturday"> Sat</label>
+                                </div>
+                            </div>
+                            <div>
+                                <strong>Locations</strong>
+                                <div id="scrape-locations-checkboxes" style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                    {% for loc in locations %}
+                                    <label style="font-weight:normal;"><input type="checkbox" class="scrape-loc-cb" value="{{ loc }}"> {{ loc }}</label>
+                                    {% endfor %}
+                                </div>
                             </div>
                         </div>
-                        <div>
-                            <strong>Locations</strong>
-                            <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
-                                {% for loc in locations %}
-                                <label style="font-weight:normal;"><input type="checkbox" class="post-loc-cb" value="{{ loc }}" onchange="applyDiscoveredTableFilters()"> {{ loc }}</label>
-                                {% endfor %}
+                    </details>
+
+                    <section style="margin-top: 1rem;">
+                        <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+                            <input type="checkbox" id="deep-scrape-cb" style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
+                            <span>Get detailed links &amp; instructor info <span style="font-weight:normal;font-size:0.85em;color:#888;">(slower)</span></span>
+                        </label>
+                        <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0; width: auto;">🔍 Discover Available Classes</button>
+                    </section>
+
+                    <section id="discovered-section" style="display:none; margin-top: 1.25rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                            <h4 style="margin:0;">Available Classes</h4>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button class="secondary" onclick="selectAllClasses()" style="width:auto; margin-bottom:0;">Select All</button>
+                                <button class="secondary outline" onclick="deselectAllClasses()" style="width:auto; margin-bottom:0;">Deselect All</button>
                             </div>
                         </div>
-                    </div>
-                    <small id="post-filter-summary" style="display:block; margin-top:0.5rem; color:#666;"></small>
-                </details>
 
-                <table id="discovered-classes-table">
-                    <thead>
-                        <tr>
-                            <th>✓</th>
-                            <th>Class</th>
-                            <th>Day</th>
-                            <th>Time</th>
-                            <th>Location</th>
-                            <th>Instructor</th>
-                        </tr>
-                    </thead>
-                    <tbody id="classes-table-body"></tbody>
-                </table>
-            </section>
+                        <details open style="margin-bottom:0.9rem; padding:0.75rem; border:1px solid var(--table-border-color, #dee2e6); border-radius:6px;">
+                            <summary><strong>Filter Displayed Results</strong></summary>
+                            <div style="display:flex; gap:2rem; flex-wrap:wrap; margin-top:0.5rem;">
+                                <div>
+                                    <strong>Days</strong>
+                                    <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Sunday" onchange="applyDiscoveredTableFilters()"> Sun</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Monday" onchange="applyDiscoveredTableFilters()"> Mon</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Tuesday" onchange="applyDiscoveredTableFilters()"> Tue</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Wednesday" onchange="applyDiscoveredTableFilters()"> Wed</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Thursday" onchange="applyDiscoveredTableFilters()"> Thu</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Friday" onchange="applyDiscoveredTableFilters()"> Fri</label>
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-day-cb" value="Saturday" onchange="applyDiscoveredTableFilters()"> Sat</label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <strong>Locations</strong>
+                                    <div style="display:flex; flex-wrap:wrap; gap:0.4rem 1rem; margin-top:0.3rem;">
+                                        {% for loc in locations %}
+                                        <label style="font-weight:normal;"><input type="checkbox" class="post-loc-cb" value="{{ loc }}" onchange="applyDiscoveredTableFilters()"> {{ loc }}</label>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                            <small id="post-filter-summary" style="display:block; margin-top:0.5rem; color:#666;"></small>
+                        </details>
 
-            <!-- Enroll selected controls (hidden until classes are discovered) -->
-            <section id="enroll-selected-section" style="display:none;">
-                <div style="display:flex; gap:1rem; align-items:center;">
-                    <button id="enroll-selected-button" onclick="startSelectedEnrollment()" style="margin-bottom:0;">▶ Enroll Selected Classes</button>
-                    <button id="stop-enroll-button" class="secondary outline" onclick="stopSelectedEnrollment()" style="margin-bottom:0; border-color:#dc3545; color:#dc3545;" disabled>⏹ Stop</button>
+                        <table id="discovered-classes-table">
+                            <thead>
+                                <tr>
+                                    <th>✓</th>
+                                    <th>Class</th>
+                                    <th>Day</th>
+                                    <th>Time</th>
+                                    <th>Location</th>
+                                    <th>Instructor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="classes-table-body"></tbody>
+                        </table>
+                    </section>
+
+                    <section id="enroll-selected-section" style="display:none; margin-top: 1rem;">
+                        <button id="enroll-selected-button" onclick="startSelectedEnrollment()" style="margin-bottom:0; width: auto;">▶ Enroll Selected Classes</button>
+                    </section>
                 </div>
-                <p style="margin-top:0.75rem;">Status: <span id="enroll-selected-status" class="status-idle">Idle</span></p>
             </section>
 
-            <section id="enroll-selected-output" style="display:none;">
-                <h4>Enrollment Output</h4>
-                <div id="enroll-selected-terminal" class="discover-terminal">Waiting to start...</div>
+            <!-- ===== Shared Run Panel ===== -->
+            <section class="run-panel">
+                <div class="run-panel-bar">
+                    <strong>Run Output</strong>
+                    <span style="color: var(--muted-color); font-size: 0.85rem;">Status:
+                        <span id="status-indicator" class="status-idle">Idle</span>
+                    </span>
+                    <span class="spacer"></span>
+                    <button id="stop-button" class="secondary outline stop-btn" onclick="stopActive()" disabled>⏹ Stop</button>
+                </div>
+                <div id="terminal">Waiting to start...</div>
             </section>
-        </div><!-- end #tab-discover -->
-
-    </main>
+        </main>
+    </div>
 
     <script>
         const initialSchedule = {{ initial_schedule | tojson | safe }};
+        const initialSchedulesList = {{ schedules_list | tojson | safe }};
+        const initialDefaultScheduleFilename = "{{ default_schedule_filename or '' }}";
         const terminal = document.getElementById("terminal");
         const statusIndicator = document.getElementById("status-indicator");
         const runButton = document.getElementById("run-button");
         const stopButton = document.getElementById("stop-button");
         const scheduleContainer = document.getElementById("schedule-container");
 
-        let ws = null;
         let rowCount = 0;
-        let currentScheduleFilename = "{{ default_schedule_filename or '' }}";
+        let currentScheduleFilename = initialDefaultScheduleFilename;
+        let defaultScheduleFilename = initialDefaultScheduleFilename;
 
-        // Initialize the schedule grid
+        // ----- Active workflow tracking (drives the shared Stop button) -----
+        // kind: "manual" | "discover" | "enroll-selected" | null
+        let activeWs = null;
+        let activeKind = null;
+        let isStopped = false;
+
+        // ----- Init -----
         window.onload = function() {
+            renderSidebarSchedulesList();
+
             if (initialSchedule && initialSchedule.length > 0) {
                 initialSchedule.forEach(cls => {
                     addScheduleRow(cls.Location, cls.Day, cls.Time);
                 });
             } else {
-                addScheduleRow(); // Add one empty row by default
+                addScheduleRow();
             }
         };
 
         function togglePassword() {
             const passwordInput = document.getElementById("password");
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
-            } else {
-                passwordInput.type = "password";
+            passwordInput.type = passwordInput.type === "password" ? "text" : "password";
+        }
+
+        // ===== Sidebar: saved schedules =====
+        function renderSidebarSchedulesList() {
+            const ul = document.getElementById('schedules-list');
+            ul.innerHTML = '';
+            if (!initialSchedulesList || initialSchedulesList.length === 0) {
+                const li = document.createElement('li');
+                li.innerHTML = '<small style="color: var(--muted-color);">No saved schedules yet.</small>';
+                ul.appendChild(li);
+                return;
+            }
+            initialSchedulesList.forEach(function(filename) {
+                const li = document.createElement('li');
+                if (filename === defaultScheduleFilename) li.classList.add('is-default');
+                li.dataset.filename = filename;
+
+                const star = document.createElement('button');
+                star.className = 'star-btn';
+                star.title = 'Set as default';
+                star.innerText = filename === defaultScheduleFilename ? '★' : '☆';
+                star.onclick = function(ev) {
+                    ev.stopPropagation();
+                    setDefaultSchedule(filename);
+                };
+
+                const nameBtn = document.createElement('button');
+                nameBtn.className = 'name-btn';
+                nameBtn.innerText = filename;
+                nameBtn.title = 'Load schedule';
+                nameBtn.onclick = function() { loadScheduleByName(filename); };
+
+                li.appendChild(star);
+                li.appendChild(nameBtn);
+                ul.appendChild(li);
+            });
+        }
+
+        async function setDefaultSchedule(filename) {
+            try {
+                const resp = await fetch('/api/update-default-schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename })
+                });
+                if (!resp.ok) {
+                    alert('Failed to set default schedule.');
+                    return;
+                }
+                defaultScheduleFilename = filename;
+                renderSidebarSchedulesList();
+            } catch (err) {
+                console.error('Failed to set default schedule:', err);
+                alert('Failed to set default schedule.');
             }
         }
 
-        async function loadSchedule() {
-            const select = document.getElementById('schedule-select');
-            const filename = select.value;
-            currentScheduleFilename = filename; // Update global tracker
-
-            if (!filename) {
-                return;
-            }
-
+        // ===== Manual schedule editor =====
+        async function loadScheduleByName(filename) {
+            currentScheduleFilename = filename;
+            switchTab('manual', document.getElementById('tab-btn-manual'));
             try {
                 const response = await fetch(`/api/schedules/${filename}`);
                 if (!response.ok) {
@@ -424,19 +559,13 @@
                     return;
                 }
                 const schedule = await response.json();
-
-                // Clear existing
                 scheduleContainer.innerHTML = '';
-                rowCount = 0; // reset counter
-
+                rowCount = 0;
                 if (schedule && schedule.length > 0) {
-                    schedule.forEach(cls => {
-                        addScheduleRow(cls.Location, cls.Day, cls.Time);
-                    });
+                    schedule.forEach(cls => addScheduleRow(cls.Location, cls.Day, cls.Time));
                 } else {
                     addScheduleRow();
                 }
-
                 document.getElementById('schedule-name').value = filename;
             } catch (error) {
                 console.error("Error loading schedule:", error);
@@ -450,9 +579,7 @@
                 alert("Please enter a filename to save the schedule.");
                 return;
             }
-            if (!filename.endsWith('.json')) {
-                filename += '.json';
-            }
+            if (!filename.endsWith('.json')) filename += '.json';
 
             const scheduleData = getScheduleData();
             const payload = scheduleData.map(item => ({
@@ -465,14 +592,10 @@
                 const response = await fetch('/api/schedules', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        filename: filename,
-                        schedule: payload
-                    })
+                    body: JSON.stringify({ filename: filename, schedule: payload })
                 });
-
                 if (response.ok) {
-                    alert("Schedule saved successfully! Please reload the page to see it in the dropdown.");
+                    alert("Schedule saved successfully! Reload the page to see it in the sidebar.");
                 } else {
                     alert("Failed to save schedule.");
                 }
@@ -491,7 +614,6 @@
             const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
             let dayOptions = days.map(d => `<option value="${d}" ${d === day ? 'selected' : ''}>${d}</option>`).join("");
 
-            // Location
             const predefinedLocs = {{ locations | tojson }};
             let isCustomLoc = loc && !predefinedLocs.includes(loc);
             let locOptions = predefinedLocs.map(l => `<option value="${l}" ${l === loc ? 'selected' : ''}>${l}</option>`).join("");
@@ -510,7 +632,6 @@
                 </div>
             `;
 
-            // Time
             const predefinedTimes = ["5:45am", "7:00am", "9:00am", "10:00am", "10:30am", "12:00pm"];
             let isCustomTime = time && !predefinedTimes.includes(time);
             let timeOptions = predefinedTimes.map(t => `<option value="${t}" ${t === time ? 'selected' : ''}>${t}</option>`).join("");
@@ -554,19 +675,16 @@
                 const locSelect = row.querySelector(".loc-input");
                 const locInput = row.querySelector(".loc-input-text");
                 const loc = locSelect.style.display === 'none' ? locInput.value.trim() : locSelect.value.trim();
-
                 const day = row.querySelector(".day-input").value;
-
                 const timeSelect = row.querySelector(".time-input");
                 const timeInput = row.querySelector(".time-input-text");
                 const time = timeSelect.style.display === 'none' ? timeInput.value.trim() : timeSelect.value.trim();
-
                 if (loc && time && loc !== '__CUSTOM__' && time !== '__CUSTOM__') {
                     schedule.push({
                         "Location": loc,
                         "Day": day,
                         "Time": time,
-                        "rowId": row.id // keep track of rowId to update status
+                        "rowId": row.id
                     });
                 }
             });
@@ -582,60 +700,73 @@
         function clearSchedule() {
             scheduleContainer.innerHTML = '';
             rowCount = 0;
-            addScheduleRow(); // Add one empty row so it's not totally blank
-            document.getElementById('schedule-select').value = ''; // Reset dropdown
+            addScheduleRow();
         }
 
+        // ===== Shared status / terminal / stop =====
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
             statusIndicator.innerText = text;
-            if (state === 'running') {
-                runButton.setAttribute('disabled', 'true');
+            const running = state === 'running';
+            if (running) {
                 stopButton.removeAttribute('disabled');
             } else {
-                runButton.removeAttribute('disabled');
                 stopButton.setAttribute('disabled', 'true');
+            }
+            if (runButton) {
+                if (running && activeKind === 'manual') {
+                    runButton.setAttribute('disabled', 'true');
+                } else {
+                    runButton.removeAttribute('disabled');
+                }
+            }
+            const discoverBtn = document.getElementById('discover-button');
+            if (discoverBtn) {
+                if (running && activeKind === 'discover') discoverBtn.setAttribute('disabled', 'true');
+                else discoverBtn.removeAttribute('disabled');
+            }
+            const enrollSelectedBtn = document.getElementById('enroll-selected-button');
+            if (enrollSelectedBtn) {
+                if (running && activeKind === 'enroll-selected') enrollSelectedBtn.setAttribute('disabled', 'true');
+                else enrollSelectedBtn.removeAttribute('disabled');
             }
         }
 
-        let isStopped = false;
-
-        function stopAutomation() {
-            if (ws) {
-                isStopped = true;
-                ws.close();
-                updateStatus("idle", "Stopped by user");
-            }
+        function stopActive() {
+            if (!activeWs) return;
+            isStopped = true;
+            try { activeWs.close(); } catch (e) {}
+            updateStatus("idle", "Stopped by user");
+            activeWs = null;
+            activeKind = null;
         }
 
         function appendToTerminal(text) {
-            terminal.innerHTML += text + "<br>";
+            terminal.innerHTML += escapeHtml(text) + "<br>";
             terminal.scrollTop = terminal.scrollHeight;
 
-            // Very simple visual feedback parsing based on logs
-            // (A more robust solution would send structured JSON events from the Python script)
-            const scheduleData = getScheduleData(); // re-fetch to get current order
-
+            // Visual feedback for manual schedule rows
+            const scheduleData = getScheduleData();
             if (text.includes("--- Processing class")) {
-                // E.g. "--- Processing class 1/2" -> extract index 1
                 const match = text.match(/Processing class (\d+)\//);
                 if (match) {
                     const idx = parseInt(match[1]) - 1;
                     if (scheduleData[idx]) {
-                        const badgeId = `status-${scheduleData[idx].rowId}`;
-                        const badge = document.getElementById(badgeId);
+                        const badge = document.getElementById(`status-${scheduleData[idx].rowId}`);
                         if (badge) badge.className = "status-badge status-processing";
                     }
                 }
             } else if (text.includes("Did not see confirmation toast") || text.includes("Confirmed enrollment") || text.includes("Cart item count is now")) {
-                // If we see these, it usually means the class processing finished.
-                // We'll mark the currently "processing" one as done (green).
                 const processingBadge = document.querySelector(".status-processing");
                 if (processingBadge) processingBadge.className = "status-badge status-done";
             } else if (text.includes("ERROR - Failed to enroll")) {
-                 const processingBadge = document.querySelector(".status-processing");
-                 if (processingBadge) processingBadge.className = "status-badge status-failed";
+                const processingBadge = document.querySelector(".status-processing");
+                if (processingBadge) processingBadge.className = "status-badge status-failed";
             }
+        }
+
+        function clearTerminal() {
+            terminal.innerHTML = '';
         }
 
         function saveConfigToEnv() {
@@ -652,6 +783,7 @@
             }).catch(err => console.error('Could not save config to .env:', err));
         }
 
+        // ===== Manual: run schedule =====
         async function startAutomation() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
@@ -659,16 +791,10 @@
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const schedule = getScheduleData();
-            const schedulePayload = schedule.map(({ Location, Day, Time }) => ({
-                Location,
-                Day,
-                Time
-            }));
+            const schedulePayload = schedule.map(({ Location, Day, Time }) => ({ Location, Day, Time }));
 
-            // Silently persist credentials and config to .env
             saveConfigToEnv();
 
-            // Silently update the .env file with the last run schedule
             if (currentScheduleFilename) {
                 try {
                     await fetch('/api/update-default-schedule', {
@@ -676,67 +802,63 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ filename: currentScheduleFilename })
                     });
+                    defaultScheduleFilename = currentScheduleFilename;
+                    renderSidebarSchedulesList();
                 } catch (error) {
                     console.error("Could not update default schedule in .env:", error);
                 }
             }
 
             if (!email || !password || !student_id) {
-                alert("Please fill in all credentials.");
+                alert("Please fill in all credentials in the Configuration sidebar.");
                 return;
             }
-
             if (schedulePayload.length === 0) {
                 alert("Please add at least one valid class to the schedule.");
                 return;
             }
 
-            terminal.innerHTML = "";
+            clearTerminal();
             resetBadges();
-            updateStatus("running", "Running...");
             isStopped = false;
+            activeKind = 'manual';
+            updateStatus("running", "Running enrollment schedule...");
 
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${protocol}//${window.location.host}/ws/run`;
-            ws = new WebSocket(wsUrl);
+            activeWs = new WebSocket(`${protocol}//${window.location.host}/ws/run`);
 
-            ws.onopen = function() {
-                // Send configuration as the first message
-                ws.send(JSON.stringify({
-                    email: email,
-                    password: password,
-                    student_id: student_id,
-                    promo_code: promo_code,
-                    complete_transaction: complete_transaction,
+            activeWs.onopen = function() {
+                activeWs.send(JSON.stringify({
+                    email, password, student_id, promo_code,
+                    complete_transaction,
                     schedule: schedulePayload
                 }));
             };
 
-            ws.onmessage = function(event) {
-                appendToTerminal(event.data);
-            };
+            activeWs.onmessage = function(event) { appendToTerminal(event.data); };
 
-            ws.onclose = function(event) {
-                if (isStopped) return; // Status already set by stopAutomation
-
-                if (terminal.innerHTML.includes("successfully")) {
+            activeWs.onclose = function() {
+                if (isStopped) { activeWs = null; activeKind = null; return; }
+                if (terminal.innerText.includes("successfully")) {
                     const total = document.querySelectorAll(".schedule-row").length;
                     const done = document.querySelectorAll(".status-done").length;
-                    updateStatus("success", `Completed: Added ${done} of ${total} scheduled classes`);
-                } else if (terminal.innerHTML.includes("failed") || terminal.innerHTML.includes("Error")) {
+                    updateStatus("success", `Completed: ${done} of ${total} classes added`);
+                } else if (terminal.innerText.includes("failed") || terminal.innerText.includes("Error")) {
                     updateStatus("error", "Failed");
                 } else {
                     updateStatus("idle", "Disconnected");
                 }
+                activeWs = null;
+                activeKind = null;
             };
 
-            ws.onerror = function(error) {
+            activeWs.onerror = function(error) {
                 appendToTerminal("WebSocket Error: " + error);
                 updateStatus("error", "Connection Error");
             };
         }
 
-        // ===== Tab switching =====
+        // ===== Tabs =====
         function switchTab(name, btn) {
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -744,9 +866,7 @@
             if (btn) btn.classList.add('active');
         }
 
-        // ===== Tab 2: Discover & Enroll =====
-        let discoverWs = null;
-        let discoverStopped = false;
+        // ===== Discover & Enroll =====
         let discoveredClasses = [];
 
         function normalizeDiscoveredClass(cls) {
@@ -761,22 +881,16 @@
         }
 
         function getDiscoveredClassKey(cls) {
-            const normalized = normalizeDiscoveredClass(cls);
-            return [normalized.Day, normalized.Time, normalized.Location, normalized.name]
-                .map(part => String(part || '').trim().toLowerCase())
-                .join('|');
+            const n = normalizeDiscoveredClass(cls);
+            return [n.Day, n.Time, n.Location, n.name].map(p => String(p || '').trim().toLowerCase()).join('|');
         }
 
         function parseDiscoveredClassFromLog(text) {
             const match = text.match(/Found:\s*([A-Za-z]+)\s+at\s+([0-9:]+\s*[ap]m)\s*[—-]\s*(.+?)(?:\s+\(([^()]+)\))?\s*$/i);
-            if (!match) {
-                return null;
-            }
-
+            if (!match) return null;
             const [, day, time, rawName, explicitLocation] = match;
             const cleanedName = rawName.trim();
             const fallbackLocation = cleanedName.includes(':') ? cleanedName.split(':')[0].trim() : '';
-
             return normalizeDiscoveredClass({
                 name: cleanedName,
                 Day: day,
@@ -790,18 +904,14 @@
             const normalized = normalizeDiscoveredClass(cls);
             const key = getDiscoveredClassKey(normalized);
             const existingIndex = discoveredClasses.findIndex(existing => getDiscoveredClassKey(existing) === key);
-
             if (existingIndex >= 0) {
                 discoveredClasses[existingIndex] = { ...discoveredClasses[existingIndex], ...normalized };
             } else {
                 discoveredClasses.push(normalized);
             }
-
             populateClassesTable(discoveredClasses);
-
-            const statusEl = document.getElementById('discover-status');
-            if (statusEl.classList.contains('status-running')) {
-                statusEl.innerText = `Discovering... (${discoveredClasses.length} found)`;
+            if (activeKind === 'discover') {
+                statusIndicator.innerText = `Discovering... (${discoveredClasses.length} found)`;
             }
         }
 
@@ -810,12 +920,10 @@
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
 
-            // Silently persist credentials and config to .env
             saveConfigToEnv();
 
             if (!email || !password || !student_id) {
-                alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
-                switchTab('config', document.getElementById('tab-btn-config'));
+                alert("Please fill in Email, Password, and Student ID in the Configuration sidebar first.");
                 return;
             }
 
@@ -826,88 +934,56 @@
             const deep_scrape = document.getElementById('deep-scrape-cb').checked;
 
             discoveredClasses = [];
-            document.getElementById('discover-terminal').innerHTML = '';
             document.getElementById('discovered-section').style.display = 'none';
             document.getElementById('enroll-selected-section').style.display = 'none';
-            document.getElementById('enroll-selected-output').style.display = 'none';
             document.getElementById('classes-table-body').innerHTML = '';
 
-            discoverStopped = false;
-            const statusEl = document.getElementById('discover-status');
-            statusEl.className = 'status-running';
-            statusEl.innerText = 'Discovering...';
-            document.getElementById('discover-button').setAttribute('disabled', 'true');
-            document.getElementById('stop-discover-button').removeAttribute('disabled');
+            clearTerminal();
+            isStopped = false;
+            activeKind = 'discover';
+            updateStatus('running', 'Discovering...');
 
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            discoverWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
+            activeWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
 
-            discoverWs.onopen = function() {
-                discoverWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations, deep_scrape }));
+            activeWs.onopen = function() {
+                activeWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations, deep_scrape }));
             };
 
-            discoverWs.onmessage = function(event) {
+            activeWs.onmessage = function(event) {
                 const text = event.data;
                 if (text.startsWith('CLASSES_JSON:')) {
                     try {
                         discoveredClasses = JSON.parse(text.substring('CLASSES_JSON:'.length)).map(normalizeDiscoveredClass);
                         populateClassesTable(discoveredClasses);
                     } catch(e) {
-                        appendToDiscoverTerminal('Error parsing class data: ' + e.message);
+                        appendToTerminal('Error parsing class data: ' + e.message);
                     }
                     return;
                 }
-
                 const parsedClass = parseDiscoveredClassFromLog(text);
-                if (parsedClass) {
-                    upsertDiscoveredClass(parsedClass);
-                }
-
-                appendToDiscoverTerminal(text);
+                if (parsedClass) upsertDiscoveredClass(parsedClass);
+                appendToTerminal(text);
             };
 
-            discoverWs.onclose = function() {
-                if (discoverStopped) return;
-                document.getElementById('discover-button').removeAttribute('disabled');
-                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
-                const statusEl = document.getElementById('discover-status');
-                const terminalText = document.getElementById('discover-terminal').innerText;
+            activeWs.onclose = function() {
+                if (isStopped) { activeWs = null; activeKind = null; return; }
+                const terminalText = terminal.innerText;
                 if (terminalText.includes('Discovery failed with exit code') || terminalText.includes('WebSocket error during discovery.') || terminalText.includes('Error:')) {
-                    statusEl.className = 'status-error';
-                    statusEl.innerText = 'Discovery failed';
+                    updateStatus('error', 'Discovery failed');
                 } else if (discoveredClasses.length > 0) {
-                    statusEl.className = 'status-success';
-                    statusEl.innerText = `Found ${discoveredClasses.length} class(es)`;
+                    updateStatus('success', `Found ${discoveredClasses.length} class(es)`);
                 } else {
-                    statusEl.className = 'status-idle';
-                    statusEl.innerText = 'No classes found';
+                    updateStatus('idle', 'No classes found');
                 }
+                activeWs = null;
+                activeKind = null;
             };
 
-            discoverWs.onerror = function() {
-                appendToDiscoverTerminal('WebSocket error during discovery.');
-                document.getElementById('discover-status').className = 'status-error';
-                document.getElementById('discover-status').innerText = 'Error';
-                document.getElementById('discover-button').removeAttribute('disabled');
-                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
+            activeWs.onerror = function() {
+                appendToTerminal('WebSocket error during discovery.');
+                updateStatus('error', 'Error');
             };
-        }
-
-        function stopDiscovery() {
-            if (discoverWs) {
-                discoverStopped = true;
-                discoverWs.close();
-                document.getElementById('discover-status').className = 'status-idle';
-                document.getElementById('discover-status').innerText = 'Stopped';
-                document.getElementById('discover-button').removeAttribute('disabled');
-                document.getElementById('stop-discover-button').setAttribute('disabled', 'true');
-            }
-        }
-
-        function appendToDiscoverTerminal(text) {
-            const t = document.getElementById('discover-terminal');
-            t.innerHTML += escapeHtml(text) + '<br>';
-            t.scrollTop = t.scrollHeight;
         }
 
         function populateClassesTable(classes) {
@@ -939,34 +1015,24 @@
         }
 
         function applyDiscoveredTableFilters() {
-            const selectedDays = Array.from(document.querySelectorAll('.post-day-cb:checked'))
-                .map(cb => cb.value.toLowerCase());
-            const selectedLocs = Array.from(document.querySelectorAll('.post-loc-cb:checked'))
-                .map(cb => cb.value.trim().toLowerCase());
+            const selectedDays = Array.from(document.querySelectorAll('.post-day-cb:checked')).map(cb => cb.value.toLowerCase());
+            const selectedLocs = Array.from(document.querySelectorAll('.post-loc-cb:checked')).map(cb => cb.value.trim().toLowerCase());
 
             let visibleCount = 0;
             document.querySelectorAll('#classes-table-body tr').forEach(function(row) {
                 const cb = row.querySelector('.class-checkbox');
                 const idx = cb ? parseInt(cb.dataset.index, 10) : -1;
                 const cls = discoveredClasses[idx] || {};
-
                 const day = (cls.day || cls.Day || '').trim().toLowerCase();
                 const location = (cls.location || cls.Location || '').trim().toLowerCase();
-
                 const dayMatch = selectedDays.length === 0 || selectedDays.includes(day);
                 const locMatch = selectedLocs.length === 0 || selectedLocs.includes(location);
                 const shouldShow = dayMatch && locMatch;
-
                 row.style.display = shouldShow ? '' : 'none';
-                if (shouldShow) {
-                    visibleCount += 1;
-                }
+                if (shouldShow) visibleCount += 1;
             });
-
             const summary = document.getElementById('post-filter-summary');
-            if (summary) {
-                summary.innerText = `Showing ${visibleCount} of ${discoveredClasses.length} discovered class(es).`;
-            }
+            if (summary) summary.innerText = `Showing ${visibleCount} of ${discoveredClasses.length} discovered class(es).`;
         }
 
         function escapeHtml(str) {
@@ -975,24 +1041,15 @@
             return d.innerHTML;
         }
 
-        function isNormalWebSocketClose(event) {
-            return !event || event.code === 1000 || event.code === 1001;
-        }
-
         function selectAllClasses() {
-            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = true; });
+            document.querySelectorAll('.class-checkbox').forEach(cb => { cb.checked = true; });
         }
 
         function deselectAllClasses() {
-            document.querySelectorAll('.class-checkbox').forEach(function(cb) { cb.checked = false; });
+            document.querySelectorAll('.class-checkbox').forEach(cb => { cb.checked = false; });
         }
 
-        // ===== Enroll selected discovered classes =====
-        let enrollSelectedWs = null;
-        let enrollSelectedStopped = false;
-        let enrollSelectedHadMessage = false;
-        let enrollSelectedTransportError = false;
-
+        // ===== Enroll selected =====
         function startSelectedEnrollment() {
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
@@ -1000,21 +1057,17 @@
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
 
-            // Silently persist credentials and config to .env
             saveConfigToEnv();
 
             if (!email || !password || !student_id) {
-                alert("Please fill in Email, Password, and Student ID in the Configuration tab first.");
-                switchTab('config', document.getElementById('tab-btn-config'));
+                alert("Please fill in Email, Password, and Student ID in the Configuration sidebar first.");
                 return;
             }
 
             const selected = [];
             document.querySelectorAll('.class-checkbox:checked').forEach(function(cb) {
                 const idx = parseInt(cb.dataset.index);
-                if (discoveredClasses[idx]) {
-                    selected.push(discoveredClasses[idx]);
-                }
+                if (discoveredClasses[idx]) selected.push(discoveredClasses[idx]);
             });
 
             if (selected.length === 0) {
@@ -1022,84 +1075,44 @@
                 return;
             }
 
-            document.getElementById('enroll-selected-terminal').innerHTML = '';
-            document.getElementById('enroll-selected-output').style.display = 'block';
-            enrollSelectedStopped = false;
-            enrollSelectedHadMessage = false;
-            enrollSelectedTransportError = false;
-
-            const statusEl = document.getElementById('enroll-selected-status');
-            statusEl.className = 'status-running';
-            statusEl.innerText = 'Enrolling...';
-            document.getElementById('enroll-selected-button').setAttribute('disabled', 'true');
-            document.getElementById('stop-enroll-button').removeAttribute('disabled');
+            clearTerminal();
+            isStopped = false;
+            activeKind = 'enroll-selected';
+            updateStatus('running', `Enrolling ${selected.length} class(es)...`);
 
             const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            enrollSelectedWs = new WebSocket(`${protocol}//${window.location.host}/ws/enroll-selected`);
+            activeWs = new WebSocket(`${protocol}//${window.location.host}/ws/enroll-selected`);
 
-            enrollSelectedWs.onopen = function() {
-                enrollSelectedWs.send(JSON.stringify({
-                    email: email,
-                    password: password,
-                    student_id: student_id,
-                    promo_code: promo_code,
-                    complete_transaction: complete_transaction,
+            activeWs.onopen = function() {
+                activeWs.send(JSON.stringify({
+                    email, password, student_id, promo_code,
+                    complete_transaction,
                     selected_classes: selected
                 }));
             };
 
-            enrollSelectedWs.onmessage = function(event) {
-                enrollSelectedHadMessage = true;
-                appendToEnrollSelectedTerminal(event.data);
-            };
+            activeWs.onmessage = function(event) { appendToTerminal(event.data); };
 
-            enrollSelectedWs.onclose = function(event) {
-                if (enrollSelectedStopped) return;
-                document.getElementById('enroll-selected-button').removeAttribute('disabled');
-                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
-                const statusEl = document.getElementById('enroll-selected-status');
-                const content = document.getElementById('enroll-selected-terminal').innerText || '';
-
-                if (!isNormalWebSocketClose(event) && !content.includes('Connection to enrollment stream')) {
-                    appendToEnrollSelectedTerminal(`Connection to enrollment stream closed unexpectedly (code ${event.code}).`);
-                }
-
+            activeWs.onclose = function(event) {
+                if (isStopped) { activeWs = null; activeKind = null; return; }
+                const content = terminal.innerText || '';
                 if (content.includes('failed') || content.includes('Error')) {
-                    statusEl.className = 'status-error';
-                    statusEl.innerText = 'Failed';
+                    updateStatus('error', 'Failed');
                 } else if (content.includes('successfully')) {
-                    statusEl.className = 'status-success';
-                    statusEl.innerText = 'Completed';
-                } else if (!isNormalWebSocketClose(event) || (enrollSelectedTransportError && !enrollSelectedHadMessage)) {
-                    statusEl.className = 'status-error';
-                    statusEl.innerText = 'Connection lost';
+                    updateStatus('success', 'Completed');
+                } else if (event && event.code !== 1000 && event.code !== 1001) {
+                    updateStatus('error', 'Connection lost');
                 } else {
-                    statusEl.className = 'status-idle';
-                    statusEl.innerText = 'Done';
+                    updateStatus('idle', 'Done');
                 }
+                activeWs = null;
+                activeKind = null;
             };
 
-            enrollSelectedWs.onerror = function(event) {
-                enrollSelectedTransportError = true;
-                console.error('Enrollment websocket transport error.', event);
+            activeWs.onerror = function() {
+                appendToTerminal('WebSocket error during enrollment.');
+                updateStatus('error', 'Error');
             };
-        }
-
-        function stopSelectedEnrollment() {
-            if (enrollSelectedWs) {
-                enrollSelectedStopped = true;
-                enrollSelectedWs.close();
-                document.getElementById('enroll-selected-status').className = 'status-idle';
-                document.getElementById('enroll-selected-status').innerText = 'Stopped';
-                document.getElementById('enroll-selected-button').removeAttribute('disabled');
-                document.getElementById('stop-enroll-button').setAttribute('disabled', 'true');
-            }
-        }
-
-        function appendToEnrollSelectedTerminal(text) {
-            const t = document.getElementById('enroll-selected-terminal');
-            t.innerHTML += escapeHtml(text) + '<br>';
-            t.scrollTop = t.scrollHeight;
         }
     </script>
 </body>

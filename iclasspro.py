@@ -4,9 +4,11 @@ import argparse
 import json
 import logging
 import os
+import random
 import re
 import smtplib
 import time
+from datetime import datetime, timezone
 import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
@@ -15,6 +17,57 @@ from urllib.parse import urlparse, urljoin, quote
 
 from dotenv import load_dotenv
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
+
+
+class EnrollmentSkipped(Exception):
+    """Raised when an enrollment is intentionally skipped (e.g. already enrolled,
+    already in cart). Treated as a non-failure status by the run report."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _retry(
+    action,
+    *,
+    action_name: str,
+    attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 5.0,
+    on_retry=None,
+):
+    """Run `action` with bounded retries and exponential backoff + jitter.
+
+    `action` is a zero-arg callable. `on_retry`, if provided, is invoked between
+    attempts with (attempt_number, error) so callers can re-prepare state
+    (for example, re-resolve a stale Playwright locator)."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return action()
+        except EnrollmentSkipped:
+            raise
+        except Exception as error:
+            last_error = error
+            if attempt == attempts:
+                break
+            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            delay += random.uniform(0, 0.25)
+            logger.warning(
+                f"{action_name} failed on attempt {attempt}/{attempts}: {error}. "
+                f"Retrying in {delay:.1f}s..."
+            )
+            if on_retry is not None:
+                try:
+                    on_retry(attempt, error)
+                except Exception as prep_error:
+                    logger.debug(
+                        f"on_retry hook raised while preparing for retry: {prep_error}"
+                    )
+            time.sleep(delay)
+    raise last_error if last_error else RuntimeError(f"{action_name} failed.")
+
 
 # --- Basic Setup ---
 # Load environment variables from .env file
@@ -55,12 +108,18 @@ def send_log_email(
             success_count = sum(
                 1 for item in summary_data if item.get("status") == "Success"
             )
+            skipped_count = sum(
+                1 for item in summary_data if item.get("status") == "Skipped"
+            )
             total_count = len(summary_data)
-            if success_count == total_count:
-                subject_text = f"Added {success_count} of {total_count} classes"
+            if success_count + skipped_count == total_count:
+                subject_text = f"Added {success_count} of {total_count} classes" + (
+                    f" ({skipped_count} skipped)" if skipped_count else ""
+                )
             else:
                 subject_text = (
                     f"Enrollment Report: {success_count}/{total_count} Successful"
+                    + (f", {skipped_count} skipped" if skipped_count else "")
                 )
 
             msg = MIMEMultipart("alternative")
@@ -124,7 +183,12 @@ class IClassPro:
     # Known location names used for both UI dropdowns and class-name extraction.
     KNOWN_LOCATIONS = _load_locations()
 
-    def __init__(self, base_url: str = "", save_screenshots: bool = False):
+    def __init__(
+        self,
+        base_url: str = "",
+        save_screenshots: bool = False,
+        storage_state_path: str = "",
+    ):
         self.base_url = base_url
         self.save_screenshots = save_screenshots
         self.playwright = None
@@ -135,6 +199,12 @@ class IClassPro:
         self._login_email = ""
         self._login_password = ""
         self._is_shutting_down = False
+        self._storage_state_path = (
+            storage_state_path
+            or os.getenv("ICLASS_STORAGE_STATE", "").strip()
+            or "storage_state.json"
+        )
+        self._loaded_storage_state = False
 
     def take_screenshot(self, filename: str, full_page: bool = False):
         """Helper to save a screenshot if --save-screenshots is enabled."""
@@ -231,12 +301,43 @@ class IClassPro:
                 "--disable-features=VizDisplayCompositor",
             ],
         )
-        self.context = self.browser.new_context(viewport={"width": 1280, "height": 800})
+        context_kwargs = {"viewport": {"width": 1280, "height": 800}}
+        if self._storage_state_path and os.path.exists(self._storage_state_path):
+            try:
+                context_kwargs["storage_state"] = self._storage_state_path
+                self._loaded_storage_state = True
+                logger.info(
+                    f"Loading saved session state from {self._storage_state_path}."
+                )
+            except Exception as state_err:
+                logger.warning(f"Could not load storage state: {state_err}")
+                self._loaded_storage_state = False
+        self.context = self.browser.new_context(**context_kwargs)
         self.context.set_default_timeout(20000)
         self.context.set_default_navigation_timeout(45000)
         self.page = self.context.new_page()
         self._attach_debug_handlers()
         logger.info("Browser launched successfully.")
+
+    def _save_storage_state(self) -> None:
+        """Persist Playwright session cookies/local storage for later runs."""
+        if not self.context or not self._storage_state_path:
+            return
+        try:
+            self.context.storage_state(path=self._storage_state_path)
+            logger.info(f"Saved session state to {self._storage_state_path}.")
+        except Exception as e:
+            logger.debug(f"Failed to save storage state: {e}")
+
+    def _is_logged_in(self, timeout: int = 5000) -> bool:
+        """Best-effort check for an authenticated session on the current page."""
+        try:
+            self.page.locator("text=/My Account/i").first.wait_for(
+                state="visible", timeout=timeout
+            )
+            return True
+        except Exception:
+            return False
 
     def _get_cart_item_count(self) -> int:
         """Return an estimated number of cart items from the DOM."""
@@ -359,9 +460,20 @@ class IClassPro:
         self._login_email = email
         self._login_password = password
 
+        if self._loaded_storage_state:
+            try:
+                self._goto(self.base_url, description="portal home (session reuse)")
+                if self._is_logged_in(timeout=4000):
+                    logger.info("Reused saved session; skipping interactive login.")
+                    return
+                logger.info("Saved session not authenticated; performing full login.")
+            except Exception as e:
+                logger.debug(f"Session reuse check failed: {e}")
+
         for attempt in range(2):
             try:
                 self._login_impl(email=email, password=password)
+                self._save_storage_state()
                 return
             except PlaywrightError as error:
                 if attempt == 0 and self._is_transient_browser_error(error):
@@ -373,12 +485,47 @@ class IClassPro:
                 raise
 
     def _wait_for_class_detail_ready(self, timeout: int = 20000) -> None:
-        """Wait until the class-details view is fully rendered and actionable."""
-        self.page.wait_for_url(re.compile(r"/class-details/"), timeout=timeout)
-        self.page.wait_for_selector(
-            "text=/Class Details|Sessions:|Available for/i", timeout=timeout
+        """Wait until the class-details view is rendered and actionable.
+
+        Prefers UI-state readiness signals (Enroll Now button or detail labels)
+        over URL navigation; the URL change is treated as one of several
+        equivalent positive signals so SPA renders without a full navigation
+        still resolve."""
+        deadline = time.time() + timeout / 1000.0
+        last_error = None
+        enroll_pattern = re.compile(r"Enroll Now!?", re.IGNORECASE)
+        detail_text_re = "text=/Class Details|Sessions:|Available for/i"
+        while time.time() < deadline:
+            try:
+                if "/class-details/" in (self.page.url or ""):
+                    return
+                if self.page.get_by_role(
+                    "button", name=enroll_pattern
+                ).first.is_visible():
+                    return
+                if self.page.locator(detail_text_re).first.is_visible():
+                    return
+            except Exception as e:
+                last_error = e
+            self.page.wait_for_timeout(400)
+        raise RuntimeError(
+            f"Class detail view not ready within {timeout}ms"
+            + (f": {last_error}" if last_error else ".")
         )
-        self.page.wait_for_timeout(1000)
+
+    def _detect_idempotency_state(self) -> str:
+        """Return a label if the class detail page indicates the class is
+        already enrolled or already in cart. Empty string otherwise."""
+        try:
+            page_text = self.page.locator("body").inner_text(timeout=2500)
+        except Exception:
+            return ""
+        normalized = " ".join(page_text.split()).lower()
+        if "already enrolled" in normalized:
+            return "already_enrolled"
+        if "already in cart" in normalized or "already in your cart" in normalized:
+            return "already_in_cart"
+        return ""
 
     def _get_enrollment_issue(self) -> str:
         """Return a human-readable enrollment issue if the portal is showing one."""
@@ -418,39 +565,55 @@ class IClassPro:
             class_index=class_index,
         )
         self._wait_for_class_detail_ready()
+        self._add_current_class_to_cart(class_index=class_index)
 
-        # `button:has-text('Enroll Now')` should match `Enroll Now!`, but using
-        # the accessible role/name is more robust against DOM/styling changes.
-        enroll_now_button = self.page.get_by_role(
-            "button", name=re.compile(r"Enroll Now!?", re.IGNORECASE)
-        ).first
-        enroll_now_button.scroll_into_view_if_needed(timeout=10000)
-        enroll_now_button.wait_for(state="visible", timeout=20000)
-        enroll_now_button.click(timeout=15000)
+    def _add_current_class_to_cart(self, class_index: int) -> None:
+        """Shared 'Enroll Now' -> 'Add to Cart' flow, with retries and
+        idempotency guards."""
+        idem_state = self._detect_idempotency_state()
+        if idem_state == "already_enrolled":
+            raise EnrollmentSkipped("Already enrolled in this class.")
+        if idem_state == "already_in_cart":
+            raise EnrollmentSkipped("Class is already in the cart.")
 
-        # Get the cart count *before* adding the new class
+        enroll_pattern = re.compile(r"Enroll Now!?", re.IGNORECASE)
+        add_to_cart_pattern = re.compile(r"Add to Cart", re.IGNORECASE)
+
+        def click_enroll_now():
+            btn = self.page.get_by_role("button", name=enroll_pattern).first
+            btn.scroll_into_view_if_needed(timeout=10000)
+            btn.wait_for(state="visible", timeout=20000)
+            btn.click(timeout=15000)
+
+        _retry(click_enroll_now, action_name="Click 'Enroll Now'", attempts=3)
+
         initial_cart_count = self._get_cart_item_count()
 
-        # Wait for the "Add to Cart" button to be ready and click it
-        add_to_cart_button = self.page.get_by_role(
-            "button", name=re.compile(r"Add to Cart", re.IGNORECASE)
-        ).first
-        add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
-        add_to_cart_button.wait_for(state="visible", timeout=20000)
-        add_to_cart_button.click(timeout=15000)
+        def click_add_to_cart():
+            btn = self.page.get_by_role("button", name=add_to_cart_pattern).first
+            btn.scroll_into_view_if_needed(timeout=10000)
+            btn.wait_for(state="visible", timeout=20000)
+            btn.click(timeout=15000)
+
+        _retry(click_add_to_cart, action_name="Click 'Add to Cart'", attempts=3)
         self.page.wait_for_timeout(1500)
 
         enrollment_issue = self._get_enrollment_issue()
         if enrollment_issue:
+            lowered = enrollment_issue.lower()
+            if "already" in lowered:
+                raise EnrollmentSkipped(enrollment_issue)
             raise RuntimeError(enrollment_issue)
 
-        # Wait for the cart item count to increase
         final_cart_count = self._wait_for_cart_item_count(
             min_count=initial_cart_count + 1
         )
         if final_cart_count < initial_cart_count + 1:
             enrollment_issue = self._get_enrollment_issue()
             if enrollment_issue:
+                lowered = enrollment_issue.lower()
+                if "already" in lowered:
+                    raise EnrollmentSkipped(enrollment_issue)
                 raise RuntimeError(enrollment_issue)
             raise RuntimeError("Failed to verify that the class was added to the cart.")
 
@@ -688,7 +851,15 @@ class IClassPro:
 
         if complete_transaction:
             logger.info("Attempting to complete transaction...")
-            self.page.locator("button:has-text('Complete Transaction')").click()
+
+            def click_complete():
+                self.page.locator("button:has-text('Complete Transaction')").click(
+                    timeout=15000
+                )
+
+            _retry(
+                click_complete, action_name="Click 'Complete Transaction'", attempts=3
+            )
             logger.info("Waiting 15 seconds for transaction to finalize...")
             self.page.wait_for_timeout(15000)
             self.take_screenshot("transaction_complete.png", full_page=True)
@@ -944,43 +1115,8 @@ class IClassPro:
         logger.info(f"Enrolling via direct URL: {url}")
         self._goto(url, description="class detail page")
         self.take_screenshot(f"classes_page_url_{class_index}.png", full_page=True)
-
-        # Wait for and click "Enroll Now"
         self._wait_for_class_detail_ready()
-        enroll_now_button = self.page.get_by_role(
-            "button", name=re.compile(r"Enroll Now!?", re.IGNORECASE)
-        ).first
-        enroll_now_button.scroll_into_view_if_needed(timeout=10000)
-        enroll_now_button.wait_for(state="visible", timeout=20000)
-        enroll_now_button.click(timeout=15000)
-
-        # Get initial cart count before adding
-        initial_cart_count = self._get_cart_item_count()
-
-        # Wait for and click "Add to Cart"
-        add_to_cart_button = self.page.get_by_role(
-            "button", name=re.compile(r"Add to Cart", re.IGNORECASE)
-        ).first
-        add_to_cart_button.scroll_into_view_if_needed(timeout=10000)
-        add_to_cart_button.wait_for(state="visible", timeout=20000)
-        add_to_cart_button.click(timeout=15000)
-        self.page.wait_for_timeout(1500)
-
-        enrollment_issue = self._get_enrollment_issue()
-        if enrollment_issue:
-            raise RuntimeError(enrollment_issue)
-
-        # Verify cart count increased
-        final_cart_count = self._wait_for_cart_item_count(
-            min_count=initial_cart_count + 1
-        )
-        if final_cart_count < initial_cart_count + 1:
-            enrollment_issue = self._get_enrollment_issue()
-            if enrollment_issue:
-                raise RuntimeError(enrollment_issue)
-            raise RuntimeError("Failed to verify that the class was added to the cart.")
-
-        self.take_screenshot(f"after_add_to_cart_url_{class_index}.png", full_page=True)
+        self._add_current_class_to_cart(class_index=class_index)
 
     def close(self):
         """Safely close the browser and Playwright instances."""
@@ -1096,6 +1232,18 @@ def main():
         default=os.getenv("ICLASS_SEND_EMAIL", "0").lower() in ("1", "true", "yes"),
         help="If set, send the log file via email after completion.",
     )
+    parser.add_argument(
+        "--report-path",
+        type=str,
+        default=os.getenv("ICLASS_RUN_REPORT", "run_report.json"),
+        help="Path to write the structured run report JSON.",
+    )
+    parser.add_argument(
+        "--storage-state",
+        type=str,
+        default=os.getenv("ICLASS_STORAGE_STATE", "storage_state.json"),
+        help="Path to persist Playwright session state across runs.",
+    )
     args = parser.parse_args()
 
     # --- Setup Logging ---
@@ -1129,9 +1277,14 @@ def main():
     logger.info(f"Password: {'*' * len(args.password) if args.password else 'Not set'}")
     logger.info(f"Student ID: {args.student_id}")
 
-    driver = IClassPro(base_url=args.base_url, save_screenshots=args.save_screenshots)
+    driver = IClassPro(
+        base_url=args.base_url,
+        save_screenshots=args.save_screenshots,
+        storage_state_path=args.storage_state,
+    )
     main_exception = None
     summary_data = []
+    run_started_at = datetime.now(timezone.utc).isoformat()
 
     try:
         if args.scrape:
@@ -1174,17 +1327,23 @@ def main():
                     for k, v in class_info.items()
                     if k not in ("url", "name", "rowId")
                 }
+                class_started_at = datetime.now(timezone.utc).isoformat()
                 logger.info(
                     f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
+                used_path = "fallback_search"
                 try:
                     class_url = str(class_info.get("url") or "").strip()
                     if "/class-details/" in class_url:
+                        used_path = "url"
                         logger.info(
                             f"Using class details URL from schedule for class {i+1}: {class_url}"
                         )
                         driver.enroll_by_url(url=class_url, class_index=i)
                     else:
+                        logger.info(
+                            f"Class {i+1} has no usable URL; falling back to search-and-click."
+                        )
                         driver.enroll(
                             location=class_info.get("Location")
                             or class_info.get("location", ""),
@@ -1195,12 +1354,38 @@ def main():
                             class_index=i,
                         )
                     summary_data.append(
-                        {"class": class_info, "status": "Success", "error": ""}
+                        {
+                            "class": class_info,
+                            "status": "Success",
+                            "error": "",
+                            "path": used_path,
+                            "started_at": class_started_at,
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                except EnrollmentSkipped as skip:
+                    logger.info(f"Skipping class {class_info.get('name', '')}: {skip}")
+                    summary_data.append(
+                        {
+                            "class": class_info,
+                            "status": "Skipped",
+                            "error": str(skip),
+                            "path": used_path,
+                            "started_at": class_started_at,
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
                     )
                 except Exception as e:
                     logger.error(f"Failed to enroll in class {class_info}: {e}")
                     summary_data.append(
-                        {"class": class_info, "status": "Failed", "error": str(e)}
+                        {
+                            "class": class_info,
+                            "status": "Failed",
+                            "error": str(e),
+                            "path": used_path,
+                            "started_at": class_started_at,
+                            "finished_at": datetime.now(timezone.utc).isoformat(),
+                        }
                     )
                     driver.take_screenshot(f"error_class_{i}.png")
 
@@ -1215,6 +1400,31 @@ def main():
         main_exception = e
     finally:
         driver.close()
+
+        try:
+            mode = "scrape" if args.scrape else "enrollment"
+            counts = {
+                "total": len(summary_data),
+                "success": sum(1 for r in summary_data if r.get("status") == "Success"),
+                "skipped": sum(1 for r in summary_data if r.get("status") == "Skipped"),
+                "failed": sum(1 for r in summary_data if r.get("status") == "Failed"),
+            }
+            report = {
+                "mode": mode,
+                "started_at": run_started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "base_url": args.base_url,
+                "schedule_path": getattr(args, "schedule", None),
+                "complete_transaction": args.complete_transaction,
+                "summary": counts,
+                "results": summary_data,
+                "critical_error": str(main_exception) if main_exception else None,
+            }
+            with open(args.report_path, "w") as rf:
+                json.dump(report, rf, indent=2)
+            logger.info(f"Run report written to {args.report_path}.")
+        except Exception as report_err:
+            logger.warning(f"Failed to write run report: {report_err}")
 
         if args.send_email and not args.scrape:
             logger.info("Email sending is enabled. Checking credentials...")
