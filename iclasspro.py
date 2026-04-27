@@ -134,6 +134,7 @@ class IClassPro:
         self._last_cart_response = None
         self._login_email = ""
         self._login_password = ""
+        self._is_shutting_down = False
 
     def take_screenshot(self, filename: str, full_page: bool = False):
         """Helper to save a screenshot if --save-screenshots is enabled."""
@@ -160,11 +161,29 @@ class IClassPro:
         if self.browser:
             self.browser.on(
                 "disconnected",
-                lambda: logger.warning("Browser disconnected unexpectedly."),
+                lambda: (
+                    logger.warning("Browser disconnected unexpectedly.")
+                    if not self._is_shutting_down
+                    else None
+                ),
             )
         if self.page:
-            self.page.on("crash", lambda: logger.warning("Page crashed unexpectedly."))
-            self.page.on("close", lambda: logger.warning("Page closed unexpectedly."))
+            self.page.on(
+                "crash",
+                lambda: (
+                    logger.warning("Page crashed unexpectedly.")
+                    if not self._is_shutting_down
+                    else None
+                ),
+            )
+            self.page.on(
+                "close",
+                lambda: (
+                    logger.warning("Page closed unexpectedly.")
+                    if not self._is_shutting_down
+                    else None
+                ),
+            )
 
     def _restart_browser(self) -> None:
         logger.warning("Restarting browser after unexpected Playwright failure...")
@@ -965,6 +984,7 @@ class IClassPro:
 
     def close(self):
         """Safely close the browser and Playwright instances."""
+        self._is_shutting_down = True
         if self.context:
             try:
                 self.context.close()
@@ -987,6 +1007,7 @@ class IClassPro:
         self.context = None
         self.browser = None
         self.playwright = None
+        self._is_shutting_down = False
 
 
 def main():
@@ -1157,14 +1178,22 @@ def main():
                     f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
                 try:
-                    driver.enroll(
-                        location=class_info.get("Location")
-                        or class_info.get("location", ""),
-                        timestr=class_info.get("Time") or class_info.get("time", ""),
-                        daystr=class_info.get("Day") or class_info.get("day", ""),
-                        student_id=args.student_id,
-                        class_index=i,
-                    )
+                    class_url = str(class_info.get("url") or "").strip()
+                    if "/class-details/" in class_url:
+                        logger.info(
+                            f"Using class details URL from schedule for class {i+1}: {class_url}"
+                        )
+                        driver.enroll_by_url(url=class_url, class_index=i)
+                    else:
+                        driver.enroll(
+                            location=class_info.get("Location")
+                            or class_info.get("location", ""),
+                            timestr=class_info.get("Time")
+                            or class_info.get("time", ""),
+                            daystr=class_info.get("Day") or class_info.get("day", ""),
+                            student_id=args.student_id,
+                            class_index=i,
+                        )
                     summary_data.append(
                         {"class": class_info, "status": "Success", "error": ""}
                     )
