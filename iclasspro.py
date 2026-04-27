@@ -725,6 +725,160 @@ class IClassPro:
                 return
 
             last_error = None
+
+            # Last non-click fallback: try candidate class-details links found on
+            # the filtered results page. Some portal variants render links that
+            # are not DOM-near the time anchor and don't respond to synthetic
+            # click/navigation events.
+            candidate_ids = (
+                self.page.evaluate(
+                    r"""([timeStr]) => {
+                    const target = String(timeStr || '').toLowerCase();
+                    const anchors = Array.from(
+                        document.querySelectorAll("a[href*='class-details']")
+                    );
+                    const ranked = [];
+                    for (const a of anchors) {
+                        const href = a.getAttribute('href') || '';
+                        const m = href.match(/\/class-details\/(\d+)/);
+                        if (!m) continue;
+                        const id = m[1];
+                        let score = 0;
+                        const ownText = (a.textContent || '').toLowerCase();
+                        if (target && ownText.includes('at ' + target)) score = 2;
+                        let node = a.parentElement;
+                        for (let depth = 0; depth < 6 && node; depth++) {
+                            const text = (node.textContent || '').toLowerCase();
+                            if (target && text.includes('at ' + target)) {
+                                score = Math.max(score, 3);
+                                break;
+                            }
+                            node = node.parentElement;
+                        }
+                        ranked.push({ id, score });
+                    }
+                    ranked.sort((a, b) => b.score - a.score);
+                    const seen = new Set();
+                    const ordered = [];
+                    for (const item of ranked) {
+                        if (!seen.has(item.id)) {
+                            seen.add(item.id);
+                            ordered.push(item.id);
+                        }
+                    }
+                    return ordered;
+                }""",
+                    [timestr],
+                )
+                or []
+            )
+            if not candidate_ids:
+                # Some pages hide the actual class-details links behind a
+                # "View Available Dates" action. Expand those cards first, then
+                # re-scan for class-details IDs.
+                self.page.evaluate(
+                    r"""([timeStr]) => {
+                        const target = String(timeStr || '').toLowerCase();
+                        const allAnchors = Array.from(document.querySelectorAll("a"));
+                        for (const a of allAnchors) {
+                            const txt = (a.textContent || '').toLowerCase().trim();
+                            if (!txt.includes('view available dates')) continue;
+                            let node = a.parentElement;
+                            let nearTarget = false;
+                            for (let depth = 0; depth < 6 && node; depth++) {
+                                const blockText = (node.textContent || '').toLowerCase();
+                                if (target && blockText.includes('at ' + target)) {
+                                    nearTarget = true;
+                                    break;
+                                }
+                                node = node.parentElement;
+                            }
+                            if (nearTarget) {
+                                try { a.click(); } catch (e) {}
+                            }
+                        }
+                    }""",
+                    [timestr],
+                )
+                self.page.wait_for_timeout(800)
+                candidate_ids = (
+                    self.page.evaluate(
+                        r"""([timeStr]) => {
+                        const target = String(timeStr || '').toLowerCase();
+                        const anchors = Array.from(
+                            document.querySelectorAll("a[href*='class-details']")
+                        );
+                        const ranked = [];
+                        for (const a of anchors) {
+                            const href = a.getAttribute('href') || '';
+                            const m = href.match(/\/class-details\/(\d+)/);
+                            if (!m) continue;
+                            const id = m[1];
+                            let score = 0;
+                            const ownText = (a.textContent || '').toLowerCase();
+                            if (target && ownText.includes('at ' + target)) score = 2;
+                            let node = a.parentElement;
+                            for (let depth = 0; depth < 6 && node; depth++) {
+                                const text = (node.textContent || '').toLowerCase();
+                                if (target && text.includes('at ' + target)) {
+                                    score = Math.max(score, 3);
+                                    break;
+                                }
+                                node = node.parentElement;
+                            }
+                            ranked.push({ id, score });
+                        }
+                        ranked.sort((a, b) => b.score - a.score);
+                        const seen = new Set();
+                        const ordered = [];
+                        for (const item of ranked) {
+                            if (!seen.has(item.id)) {
+                                seen.add(item.id);
+                                ordered.push(item.id);
+                            }
+                        }
+                        return ordered;
+                    }""",
+                        [timestr],
+                    )
+                    or []
+                )
+                if candidate_ids:
+                    logger.info(
+                        "Resolved class-details candidates after expanding 'View Available Dates'."
+                    )
+            if candidate_ids:
+                filters_json = json.dumps(
+                    {
+                        "q": location,
+                        "students": str(student_id),
+                        "days": str(day_index),
+                    }
+                )
+                logger.info(
+                    f"Trying up to {min(len(candidate_ids), 6)} candidate class-details URL(s) resolved from page anchors."
+                )
+                for class_id in candidate_ids[:6]:
+                    class_url = (
+                        f"{self.base_url.rstrip('/')}/class-details/{class_id}"
+                        f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                    )
+                    try:
+                        self._goto(class_url, description="class detail page")
+                        self._wait_for_class_detail_ready(timeout=10000)
+                        logger.info(
+                            f"Opened class detail directly from candidate link: {class_url}"
+                        )
+                        return
+                    except Exception as candidate_error:
+                        last_error = candidate_error
+                        logger.debug(
+                            f"Candidate class-details URL did not open cleanly ({class_url}): {candidate_error}"
+                        )
+                        self._goto(booking_url, description="class search results")
+                        class_link = self.page.locator(f"a:has-text('at {timestr}')")
+                        class_link.first.wait_for(state="visible", timeout=10000)
+
             for attempt_label, use_force, use_js in (
                 ("standard click", False, False),
                 ("forced click", True, False),

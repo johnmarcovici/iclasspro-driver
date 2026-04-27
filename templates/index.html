@@ -120,6 +120,13 @@
             color: #dc3545;
             width: auto;
         }
+        .run-panel-bar .copy-log-btn {
+            margin: 0;
+            width: auto;
+            min-width: 2.4rem;
+            padding: 0.35rem 0.6rem;
+            line-height: 1;
+        }
 
         #terminal {
             background-color: #1e1e1e;
@@ -448,6 +455,13 @@
                         <span id="status-indicator" class="status-idle">Idle</span>
                     </span>
                     <span class="spacer"></span>
+                    <button
+                        id="copy-log-button"
+                        class="secondary outline copy-log-btn"
+                        onclick="copyLogToClipboard()"
+                        title="Copy log output"
+                        aria-label="Copy log output"
+                    >📋</button>
                     <button id="stop-button" class="secondary outline stop-btn" onclick="stopActive()" disabled>⏹ Stop</button>
                 </div>
                 <div id="terminal">Waiting to start...</div>
@@ -463,6 +477,7 @@
         const statusIndicator = document.getElementById("status-indicator");
         const runButton = document.getElementById("run-button");
         const stopButton = document.getElementById("stop-button");
+        const copyLogButton = document.getElementById("copy-log-button");
         const scheduleContainer = document.getElementById("schedule-container");
 
         let rowCount = 0;
@@ -767,6 +782,26 @@
 
         function clearTerminal() {
             terminal.innerHTML = '';
+        }
+
+        async function copyLogToClipboard() {
+            const logText = terminal.innerText || '';
+            if (!logText.trim()) {
+                updateStatus('idle', 'No log output to copy');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(logText);
+                const oldText = copyLogButton.innerText;
+                copyLogButton.innerText = '✓';
+                updateStatus('success', 'Log copied to clipboard');
+                setTimeout(() => {
+                    copyLogButton.innerText = oldText;
+                }, 1200);
+            } catch (error) {
+                updateStatus('error', 'Clipboard copy failed');
+                console.error('Failed to copy log output:', error);
+            }
         }
 
         function saveConfigToEnv() {
