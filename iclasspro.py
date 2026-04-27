@@ -674,6 +674,39 @@ class IClassPro:
             )
 
             class_id_match = re.search(r"/class-details/(\d+)", detail_href or "")
+
+            if not class_id_match:
+                # Broader scan: walk every class-details anchor on the page and
+                # match by nearby text (the time string). This handles cases
+                # where the time-bearing card anchor is not a structural
+                # ancestor of the actual class-details link.
+                global_href = self.page.evaluate(
+                    r"""([timeStr]) => {
+                        const target = String(timeStr || '').toLowerCase();
+                        if (!target) return '';
+                        const anchors = Array.from(
+                            document.querySelectorAll("a[href*='class-details']")
+                        );
+                        for (const a of anchors) {
+                            const href = a.getAttribute('href') || '';
+                            if (!/\/class-details\/\d+/.test(href)) continue;
+                            let node = a;
+                            for (let depth = 0; depth < 6 && node; depth++) {
+                                const text = (node.textContent || '').toLowerCase();
+                                if (text.includes('at ' + target)) {
+                                    return href;
+                                }
+                                node = node.parentElement;
+                            }
+                        }
+                        return '';
+                    }""",
+                    [timestr],
+                )
+                class_id_match = re.search(r"/class-details/(\d+)", global_href or "")
+                if class_id_match:
+                    logger.info("Resolved class detail URL via global DOM scan.")
+
             if class_id_match:
                 filters_json = json.dumps(
                     {
@@ -983,10 +1016,21 @@ class IClassPro:
                             f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
                             f"?selectedStudents={student_id}&filters={quote(filters_json)}"
                         )
-                    elif href.startswith("http"):
-                        class_url = href
                     else:
-                        class_url = urljoin(self.base_url, href)
+                        # Only honour the anchor's own href if it actually
+                        # points to a /class-details/<id> URL. Otherwise leave
+                        # the URL blank so downstream code falls back to the
+                        # search-based opener instead of being misled by an
+                        # SPA-root href like "/scaq".
+                        candidate_url = (
+                            href
+                            if href.startswith("http")
+                            else urljoin(self.base_url, href)
+                        )
+                        if re.search(r"/class-details/\d+", candidate_url):
+                            class_url = candidate_url
+                        else:
+                            class_url = ""
 
                     time_str = time_match.group(1)
 
