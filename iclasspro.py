@@ -879,6 +879,65 @@ class IClassPro:
                         class_link = self.page.locator(f"a:has-text('at {timestr}')")
                         class_link.first.wait_for(state="visible", timeout=10000)
 
+            if not candidate_ids:
+                # Last URL-based recovery: scan the full rendered HTML (including
+                # embedded scripts/state blobs) for class-details IDs, then try
+                # opening a few of them directly.
+                html_ids = (
+                    self.page.evaluate(
+                        r"""() => {
+                        const html = document.documentElement?.outerHTML || '';
+                        const matches = html.match(/\/class-details\/(\d+)/g) || [];
+                        const seen = new Set();
+                        const ids = [];
+                        for (const m of matches) {
+                            const idMatch = m.match(/(\d+)/);
+                            if (!idMatch) continue;
+                            const id = idMatch[1];
+                            if (!seen.has(id)) {
+                                seen.add(id);
+                                ids.push(id);
+                            }
+                        }
+                        return ids;
+                    }"""
+                    )
+                    or []
+                )
+                if html_ids:
+                    filters_json = json.dumps(
+                        {
+                            "q": location,
+                            "students": str(student_id),
+                            "days": str(day_index),
+                        }
+                    )
+                    logger.info(
+                        f"Trying up to {min(len(html_ids), 8)} class-details URL(s) discovered from page HTML."
+                    )
+                    for class_id in html_ids[:8]:
+                        class_url = (
+                            f"{self.base_url.rstrip('/')}/class-details/{class_id}"
+                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                        )
+                        try:
+                            self._goto(class_url, description="class detail page")
+                            self._wait_for_class_detail_ready(timeout=10000)
+                            logger.info(
+                                f"Opened class detail directly from page HTML match: {class_url}"
+                            )
+                            return
+                        except Exception as html_candidate_error:
+                            last_error = html_candidate_error
+                            logger.debug(
+                                f"HTML-derived class-details URL did not open cleanly ({class_url}): {html_candidate_error}"
+                            )
+                            self._goto(booking_url, description="class search results")
+                            class_link = self.page.locator(
+                                f"a:has-text('at {timestr}')"
+                            )
+                            class_link.first.wait_for(state="visible", timeout=10000)
+
             for attempt_label, use_force, use_js in (
                 ("standard click", False, False),
                 ("forced click", True, False),
