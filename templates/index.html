@@ -295,11 +295,22 @@
                         <input type="text" id="promo_code" value="{{ promo_code }}">
                     </label>
                     <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
-                        <input type="checkbox" id="complete_transaction" checked style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
+                        <input type="checkbox" id="complete_transaction" {% if complete_transaction %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
                         <span style="font-size: 0.9rem;">Complete Transaction</span>
                     </label>
                     <small style="color: var(--muted-color); font-size: 0.8rem;">
                         Uncheck to dry-run without finalising the purchase.
+                    </small>
+                    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.6rem;">
+                        <input type="checkbox" id="send_email" {% if send_email %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
+                        <span style="font-size: 0.9rem;">Send summary email after run</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.3rem;">
+                        <input type="checkbox" id="deep_debug" {% if deep_debug %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
+                        <span style="font-size: 0.9rem;">Deep debugging (save debug artifacts)</span>
+                    </label>
+                    <small style="color: var(--muted-color); font-size: 0.8rem;">
+                        Use deep debugging only when troubleshooting failures; it writes extra DOM/screenshot/debug files.
                     </small>
                 </div>
             </details>
@@ -489,6 +500,14 @@
         let activeWs = null;
         let activeKind = null;
         let isStopped = false;
+
+        function isWorkflowRunning() {
+            if (!activeWs) return false;
+            return (
+                activeWs.readyState === WebSocket.CONNECTING ||
+                activeWs.readyState === WebSocket.OPEN
+            );
+        }
 
         // ----- Init -----
         window.onload = function() {
@@ -729,20 +748,17 @@
                 stopButton.setAttribute('disabled', 'true');
             }
             if (runButton) {
-                if (running && activeKind === 'manual') {
-                    runButton.setAttribute('disabled', 'true');
-                } else {
-                    runButton.removeAttribute('disabled');
-                }
+                if (running) runButton.setAttribute('disabled', 'true');
+                else runButton.removeAttribute('disabled');
             }
             const discoverBtn = document.getElementById('discover-button');
             if (discoverBtn) {
-                if (running && activeKind === 'discover') discoverBtn.setAttribute('disabled', 'true');
+                if (running) discoverBtn.setAttribute('disabled', 'true');
                 else discoverBtn.removeAttribute('disabled');
             }
             const enrollSelectedBtn = document.getElementById('enroll-selected-button');
             if (enrollSelectedBtn) {
-                if (running && activeKind === 'enroll-selected') enrollSelectedBtn.setAttribute('disabled', 'true');
+                if (running) enrollSelectedBtn.setAttribute('disabled', 'true');
                 else enrollSelectedBtn.removeAttribute('disabled');
             }
         }
@@ -813,18 +829,26 @@
                     password: document.getElementById('password').value,
                     student_id: document.getElementById('student_id').value,
                     promo_code: document.getElementById('promo_code').value,
-                    complete_transaction: document.getElementById('complete_transaction').checked
+                    complete_transaction: document.getElementById('complete_transaction').checked,
+                    send_email: document.getElementById('send_email').checked,
+                    deep_debug: document.getElementById('deep_debug').checked
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
         }
 
         // ===== Manual: run schedule =====
         async function startAutomation() {
+            if (isWorkflowRunning()) {
+                alert('Another workflow is already running. Stop it before starting a new one.');
+                return;
+            }
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
+            const send_email = document.getElementById("send_email").checked;
+            const deep_debug = document.getElementById("deep_debug").checked;
             const schedule = getScheduleData();
             const schedulePayload = schedule.map(({ Location, Day, Time }) => ({ Location, Day, Time }));
 
@@ -866,6 +890,8 @@
                 activeWs.send(JSON.stringify({
                     email, password, student_id, promo_code,
                     complete_transaction,
+                    send_email,
+                    deep_debug,
                     schedule: schedulePayload
                 }));
             };
@@ -951,6 +977,10 @@
         }
 
         function startDiscovery() {
+            if (isWorkflowRunning()) {
+                alert('Another workflow is already running. Stop it before starting a new one.');
+                return;
+            }
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
@@ -967,6 +997,7 @@
             const scrape_days = checkedDays.join(',');
             const scrape_locations = checkedLocs.join(',');
             const deep_scrape = document.getElementById('deep-scrape-cb').checked;
+            const deep_debug = document.getElementById('deep_debug').checked;
 
             discoveredClasses = [];
             document.getElementById('discovered-section').style.display = 'none';
@@ -982,7 +1013,7 @@
             activeWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
 
             activeWs.onopen = function() {
-                activeWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations, deep_scrape }));
+                activeWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations, deep_scrape, deep_debug }));
             };
 
             activeWs.onmessage = function(event) {
@@ -1086,11 +1117,17 @@
 
         // ===== Enroll selected =====
         function startSelectedEnrollment() {
+            if (isWorkflowRunning()) {
+                alert('Another workflow is already running. Stop it before starting a new one.');
+                return;
+            }
             const email = document.getElementById("email").value;
             const password = document.getElementById("password").value;
             const student_id = document.getElementById("student_id").value;
             const promo_code = document.getElementById("promo_code").value;
             const complete_transaction = document.getElementById("complete_transaction").checked;
+            const send_email = document.getElementById("send_email").checked;
+            const deep_debug = document.getElementById("deep_debug").checked;
 
             saveConfigToEnv();
 
@@ -1122,6 +1159,8 @@
                 activeWs.send(JSON.stringify({
                     email, password, student_id, promo_code,
                     complete_transaction,
+                    send_email,
+                    deep_debug,
                     selected_classes: selected
                 }));
             };

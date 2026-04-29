@@ -7,3 +7,4 @@ screenshots/
 schedules/tmp/
 storage_state.json
 run_report.json
+debug-artifacts/

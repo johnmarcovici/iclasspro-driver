@@ -29,6 +29,8 @@ class SaveConfigRequest(BaseModel):
     student_id: str
     promo_code: str
     complete_transaction: bool
+    send_email: bool
+    deep_debug: bool
 
 
 # Load environment variables
@@ -58,6 +60,12 @@ async def get(request: Request):
         "password": os.getenv("ICLASS_PASSWORD", ""),
         "student_id": os.getenv("ICLASS_STUDENT_ID", ""),
         "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
+        "complete_transaction": os.getenv("ICLASS_COMPLETE_TRANSACTION", "1").lower()
+        in ("1", "true", "yes"),
+        "send_email": os.getenv("ICLASS_SEND_EMAIL", "0").lower()
+        in ("1", "true", "yes"),
+        "deep_debug": os.getenv("ICLASS_DEEP_DEBUG", "0").lower()
+        in ("1", "true", "yes"),
         "initial_schedule": [],
         "default_schedule_filename": None,
         "locations": _load_locations(),
@@ -122,6 +130,8 @@ async def save_config(request: SaveConfigRequest):
         "ICLASS_COMPLETE_TRANSACTION",
         "1" if request.complete_transaction else "0",
     )
+    set_key(dotenv_path, "ICLASS_SEND_EMAIL", "1" if request.send_email else "0")
+    set_key(dotenv_path, "ICLASS_DEEP_DEBUG", "1" if request.deep_debug else "0")
     return {"message": "Configuration saved"}
 
 
@@ -175,6 +185,7 @@ async def websocket_scrape(websocket: WebSocket):
         scrape_days = config.get("scrape_days", "")
         scrape_locations = config.get("scrape_locations", "")
         deep_scrape = config.get("deep_scrape", False)
+        deep_debug = config.get("deep_debug", False)
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -201,6 +212,8 @@ async def websocket_scrape(websocket: WebSocket):
             cmd_args.extend(["--scrape-locations", scrape_locations])
         if deep_scrape:
             cmd_args.append("--deep-scrape")
+        if deep_debug:
+            cmd_args.append("--deep-debug")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -264,6 +277,8 @@ async def websocket_enroll_selected(websocket: WebSocket):
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
         complete_transaction = config.get("complete_transaction", True)
+        send_email = config.get("send_email", False)
+        deep_debug = config.get("deep_debug", False)
         selected_classes = config.get("selected_classes", [])
 
         if not all([email, password, student_id]):
@@ -302,6 +317,10 @@ async def websocket_enroll_selected(websocket: WebSocket):
 
         if complete_transaction:
             cmd_args.append("--complete-transaction")
+        if send_email:
+            cmd_args.append("--send-email")
+        if deep_debug:
+            cmd_args.append("--deep-debug")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -377,6 +396,8 @@ async def websocket_endpoint(websocket: WebSocket):
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
         complete_transaction = config.get("complete_transaction", True)
+        send_email = config.get("send_email", False)
+        deep_debug = config.get("deep_debug", False)
         schedule = config.get("schedule", [])
 
         if not all([email, password, student_id]):
@@ -419,6 +440,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
         if complete_transaction:
             cmd_args.append("--complete-transaction")
+        if send_email:
+            cmd_args.append("--send-email")
+        if deep_debug:
+            cmd_args.append("--deep-debug")
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,

@@ -188,6 +188,7 @@ class IClassPro:
         base_url: str = "",
         save_screenshots: bool = False,
         storage_state_path: str = "",
+        deep_debug: bool = False,
     ):
         self.base_url = base_url
         self.save_screenshots = save_screenshots
@@ -205,6 +206,14 @@ class IClassPro:
             or "storage_state.json"
         )
         self._loaded_storage_state = False
+        self._deep_debug = deep_debug or os.getenv(
+            "ICLASS_DEEP_DEBUG", "0"
+        ).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self._debug_artifacts_dir = os.getenv("ICLASS_DEBUG_DIR", "debug-artifacts")
 
     def take_screenshot(self, filename: str, full_page: bool = False):
         """Helper to save a screenshot if --save-screenshots is enabled."""
@@ -213,6 +222,37 @@ class IClassPro:
             self.page.screenshot(
                 path=os.path.join("screenshots", filename), full_page=full_page
             )
+
+    def _write_debug_artifacts(self, label: str, payload: dict) -> None:
+        """Write deep-debug artifacts for failed interactions."""
+        if not self._deep_debug or not self.page or self.page.is_closed():
+            return
+        try:
+            os.makedirs(self._debug_artifacts_dir, exist_ok=True)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            base = f"{label}_{stamp}"
+            html_path = os.path.join(self._debug_artifacts_dir, f"{base}.html")
+            png_path = os.path.join(self._debug_artifacts_dir, f"{base}.png")
+            json_path = os.path.join(self._debug_artifacts_dir, f"{base}.json")
+
+            try:
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(self.page.content())
+            except Exception as html_err:
+                logger.debug(f"Failed to write debug HTML artifact: {html_err}")
+
+            try:
+                self.page.screenshot(path=png_path, full_page=True)
+            except Exception as shot_err:
+                logger.debug(f"Failed to write debug screenshot artifact: {shot_err}")
+
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            logger.info(
+                f"Deep debug artifacts written under {self._debug_artifacts_dir} with prefix {base}."
+            )
+        except Exception as e:
+            logger.warning(f"Failed to write deep debug artifacts: {e}")
 
     @staticmethod
     def _is_transient_browser_error(error: Exception) -> bool:
@@ -643,6 +683,11 @@ class IClassPro:
 
         # Find the link for the class time, waiting for it to appear
         class_link = self.page.locator(f"a:has-text('at {timestr}')")
+        candidate_ids = []
+        html_ids = []
+        raw_ids = []
+        observed_request_urls = []
+        debug_snapshot = {}
         try:
             # Wait for at least one to be visible
             class_link.first.wait_for(state="visible", timeout=20000)
@@ -938,22 +983,136 @@ class IClassPro:
                             )
                             class_link.first.wait_for(state="visible", timeout=10000)
 
+            if not candidate_ids:
+                # Some portal builds expose only raw class IDs (e.g. classId)
+                # inside script state. Extract and probe those IDs directly.
+                raw_ids = (
+                    self.page.evaluate(
+                        r"""() => {
+                        const html = document.documentElement?.outerHTML || '';
+                        const patterns = [
+                            /"classId"\s*:\s*(\d+)/g,
+                            /"classID"\s*:\s*(\d+)/g,
+                            /data-class-id=["'](\d+)["']/g,
+                            /classId[=:]\s*["']?(\d+)["']?/g
+                        ];
+                        const seen = new Set();
+                        const ids = [];
+                        for (const re of patterns) {
+                            re.lastIndex = 0;
+                            let m;
+                            while ((m = re.exec(html)) !== null) {
+                                const id = m[1];
+                                if (!seen.has(id)) {
+                                    seen.add(id);
+                                    ids.push(id);
+                                }
+                            }
+                        }
+                        return ids;
+                    }"""
+                    )
+                    or []
+                )
+                if raw_ids:
+                    filters_json = json.dumps(
+                        {
+                            "q": location,
+                            "students": str(student_id),
+                            "days": str(day_index),
+                        }
+                    )
+                    target_tokens = [
+                        daystr.strip().lower(),
+                        timestr.strip().lower(),
+                        location.strip().lower(),
+                    ]
+                    logger.info(
+                        f"Trying up to {min(len(raw_ids), 20)} class-details URL(s) derived from raw class IDs."
+                    )
+                    for class_id in raw_ids[:20]:
+                        class_url = (
+                            f"{self.base_url.rstrip('/')}/class-details/{class_id}"
+                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                        )
+                        try:
+                            self._goto(class_url, description="class detail page")
+                            self._wait_for_class_detail_ready(timeout=7000)
+                            body_text = (
+                                self.page.locator("body")
+                                .inner_text(timeout=3000)
+                                .lower()
+                            )
+                            # Prevent enrolling the wrong class when probing.
+                            if all(token in body_text for token in target_tokens):
+                                logger.info(
+                                    f"Opened matching class detail from raw class ID: {class_url}"
+                                )
+                                return
+                        except Exception as raw_id_error:
+                            last_error = raw_id_error
+                        self._goto(booking_url, description="class search results")
+                        class_link = self.page.locator(f"a:has-text('at {timestr}')")
+                        class_link.first.wait_for(state="visible", timeout=10000)
+
             for attempt_label, use_force, use_js in (
                 ("standard click", False, False),
                 ("forced click", True, False),
                 ("javascript click", False, True),
             ):
+                _capture_request = None
                 try:
                     logger.info(
                         f"Opening class detail via {attempt_label} for {daystr} at {timestr}."
                     )
                     class_link.last.scroll_into_view_if_needed(timeout=10000)
+                    captured_urls = []
+
+                    def _capture_request(req):
+                        try:
+                            req_url = req.url or ""
+                            if "/class-details/" in req_url:
+                                captured_urls.append(req_url)
+                            observed_request_urls.append(req_url)
+                        except Exception:
+                            pass
+
+                    self.page.on("request", _capture_request)
                     if use_js:
                         class_link.last.evaluate("(el) => el.click()")
                     else:
                         class_link.last.click(timeout=15000, force=use_force)
-                    self._wait_for_class_detail_ready(timeout=10000)
-                    return
+                    try:
+                        self._wait_for_class_detail_ready(timeout=10000)
+                        return
+                    except Exception as click_wait_error:
+                        # Some portal variants don't navigate, but they do fire
+                        # a request containing the class-details URL.
+                        captured_id = None
+                        for req_url in captured_urls:
+                            m = re.search(r"/class-details/(\d+)", req_url)
+                            if m:
+                                captured_id = m.group(1)
+                                break
+                        if captured_id:
+                            filters_json = json.dumps(
+                                {
+                                    "q": location,
+                                    "students": str(student_id),
+                                    "days": str(day_index),
+                                }
+                            )
+                            captured_url = (
+                                f"{self.base_url.rstrip('/')}/class-details/{captured_id}"
+                                f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                            )
+                            logger.info(
+                                "Recovered class details URL from click-triggered network request."
+                            )
+                            self._goto(captured_url, description="class detail page")
+                            self._wait_for_class_detail_ready(timeout=10000)
+                            return
+                        raise click_wait_error
                 except Exception as attempt_error:
                     last_error = attempt_error
                     logger.warning(
@@ -962,9 +1121,74 @@ class IClassPro:
                     self._goto(booking_url, description="class search results")
                     class_link = self.page.locator(f"a:has-text('at {timestr}')")
                     class_link.first.wait_for(state="visible", timeout=10000)
+                finally:
+                    if _capture_request is not None:
+                        try:
+                            self.page.remove_listener("request", _capture_request)
+                        except Exception:
+                            pass
+
+            # Capture focused diagnostics to make portal-specific selector
+            # mismatches visible in logs.
+            try:
+                debug_info = self.page.evaluate(
+                    r"""([timeStr]) => {
+                        const target = String(timeStr || '').toLowerCase();
+                        const anchors = Array.from(document.querySelectorAll("a"));
+                        const classDetailAnchors = anchors.filter(a => {
+                            const h = a.getAttribute('href') || '';
+                            return /\/class-details\/\d+/.test(h);
+                        });
+                        const viewDatesAnchors = anchors.filter(a => {
+                            const t = (a.textContent || '').toLowerCase();
+                            return t.includes('view available dates');
+                        });
+                        const timeAnchors = anchors
+                            .filter(a => {
+                                const t = (a.textContent || '').toLowerCase();
+                                return target && t.includes('at ' + target);
+                            })
+                            .slice(0, 5)
+                            .map(a => {
+                                const txt = (a.textContent || '').replace(/\s+/g, ' ').trim();
+                                const href = a.getAttribute('href') || '';
+                                return { text: txt.slice(0, 140), href };
+                            });
+                        return {
+                            class_details_anchor_count: classDetailAnchors.length,
+                            view_available_dates_count: viewDatesAnchors.length,
+                            time_anchor_samples: timeAnchors
+                        };
+                    }""",
+                    [timestr],
+                )
+                debug_snapshot = debug_info or {}
+                logger.warning(
+                    f"Class detail debug snapshot for {daystr} {timestr} {location}: {json.dumps(debug_snapshot)}"
+                )
+            except Exception as debug_error:
+                logger.debug(
+                    f"Failed to capture class detail debug snapshot: {debug_error}"
+                )
 
             raise last_error or RuntimeError("Class detail page did not open.")
         except Exception as error:
+            self._write_debug_artifacts(
+                "class_detail_open_failure",
+                {
+                    "day": daystr,
+                    "time": timestr,
+                    "location": location,
+                    "booking_url": booking_url,
+                    "page_url": self.page.url if self.page else "",
+                    "candidate_ids": candidate_ids,
+                    "html_ids": html_ids,
+                    "raw_ids": raw_ids,
+                    "observed_request_urls": observed_request_urls[-200:],
+                    "debug_snapshot": debug_snapshot,
+                    "error": str(error),
+                },
+            )
             raise RuntimeError(
                 f"Could not open class details for {daystr} at {timestr} in {location}: {error}"
             ) from error
@@ -1490,6 +1714,12 @@ def main():
         help="If set, send the log file via email after completion.",
     )
     parser.add_argument(
+        "--deep-debug",
+        action="store_true",
+        default=os.getenv("ICLASS_DEEP_DEBUG", "0").lower() in ("1", "true", "yes"),
+        help="If set, write deep debug artifacts on interaction failures.",
+    )
+    parser.add_argument(
         "--report-path",
         type=str,
         default=os.getenv("ICLASS_RUN_REPORT", "run_report.json"),
@@ -1538,6 +1768,7 @@ def main():
         base_url=args.base_url,
         save_screenshots=args.save_screenshots,
         storage_state_path=args.storage_state,
+        deep_debug=args.deep_debug,
     )
     main_exception = None
     summary_data = []
