@@ -13,7 +13,7 @@ import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from urllib.parse import urlparse, urljoin, quote
+from urllib.parse import urlparse, urljoin, quote, unquote, parse_qs
 
 from dotenv import load_dotenv
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -214,6 +214,9 @@ class IClassPro:
             "yes",
         )
         self._debug_artifacts_dir = os.getenv("ICLASS_DEBUG_DIR", "debug-artifacts")
+        self._class_detail_timeout_ms = int(
+            os.getenv("ICLASS_CLASS_DETAIL_TIMEOUT_MS", "45000")
+        )
 
     def take_screenshot(self, filename: str, full_page: bool = False):
         """Helper to save a screenshot if --save-screenshots is enabled."""
@@ -372,6 +375,27 @@ class IClassPro:
     def _is_logged_in(self, timeout: int = 5000) -> bool:
         """Best-effort check for an authenticated session on the current page."""
         try:
+            self.page.wait_for_timeout(200)
+            # Guest pages often show "My Account" but still expose
+            # Register/Log In actions. Prefer explicit account-state signals.
+            try:
+                if self.page.get_by_role(
+                    "link", name=re.compile(r"Log Out", re.IGNORECASE)
+                ).first.is_visible():
+                    return True
+            except Exception:
+                pass
+            try:
+                register_visible = self.page.get_by_role(
+                    "link", name=re.compile(r"^Register$", re.IGNORECASE)
+                ).first.is_visible()
+                login_visible = self.page.get_by_role(
+                    "link", name=re.compile(r"^Log In$", re.IGNORECASE)
+                ).first.is_visible()
+                if register_visible and login_visible:
+                    return False
+            except Exception:
+                pass
             self.page.locator("text=/My Account/i").first.wait_for(
                 state="visible", timeout=timeout
             )
@@ -486,12 +510,15 @@ class IClassPro:
         self.take_screenshot("05_after_filling_credentials.png")
         password_field.press("Enter")
 
-        # Wait for successful login (e.g., by checking for a dashboard element)
-        try:
-            self.page.wait_for_selector("text=/My Account/i", timeout=15000)
-            logger.info("Login successful.")
-        except Exception:
-            logger.error("Login failed. Could not find 'My Account' text after login.")
+        # Wait for successful authenticated state.
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if self._is_logged_in(timeout=1000):
+                logger.info("Login successful.")
+                break
+            self.page.wait_for_timeout(400)
+        else:
+            logger.error("Login failed. Could not confirm authenticated session.")
             self.take_screenshot("login_failure.png")
             raise RuntimeError("Login failed. Please check credentials and portal URL.")
 
@@ -524,13 +551,14 @@ class IClassPro:
                     continue
                 raise
 
-    def _wait_for_class_detail_ready(self, timeout: int = 20000) -> None:
+    def _wait_for_class_detail_ready(self, timeout: int | None = None) -> None:
         """Wait until the class-details view is rendered and actionable.
 
         Prefers UI-state readiness signals (Enroll Now button or detail labels)
         over URL navigation; the URL change is treated as one of several
         equivalent positive signals so SPA renders without a full navigation
         still resolve."""
+        timeout = timeout or self._class_detail_timeout_ms
         deadline = time.time() + timeout / 1000.0
         last_error = None
         enroll_pattern = re.compile(r"Enroll Now!?", re.IGNORECASE)
@@ -552,6 +580,47 @@ class IClassPro:
             f"Class detail view not ready within {timeout}ms"
             + (f": {last_error}" if last_error else ".")
         )
+
+    def _wait_for_portal_idle(self, timeout: int = 45000) -> None:
+        """Wait for customer-portal loading overlays/modals to settle.
+
+        iClassPro frequently keeps cards visible but non-interactive while
+        loading spinners/backdrops are on top of the UI.
+        """
+        deadline = time.time() + timeout / 1000.0
+        while time.time() < deadline:
+            try:
+                settled = self.page.evaluate(
+                    r"""() => {
+                        const isVisible = (el) => {
+                            if (!el) return false;
+                            const style = window.getComputedStyle(el);
+                            return (
+                                style.display !== 'none' &&
+                                style.visibility !== 'hidden' &&
+                                parseFloat(style.opacity || '1') > 0 &&
+                                (el.offsetWidth > 0 || el.offsetHeight > 0)
+                            );
+                        };
+
+                        const blockingSelectors = [
+                            '.modal-backdrop.show',
+                            '.modal-backdrop.fade.show',
+                            '.modal.show .loading-icon',
+                            '.loading-icon',
+                        ];
+                        for (const sel of blockingSelectors) {
+                            const nodes = Array.from(document.querySelectorAll(sel));
+                            if (nodes.some(isVisible)) return false;
+                        }
+                        return true;
+                    }"""
+                )
+                if settled:
+                    return
+            except Exception:
+                pass
+            self.page.wait_for_timeout(400)
 
     def _detect_idempotency_state(self) -> str:
         """Return a label if the class detail page indicates the class is
@@ -595,15 +664,24 @@ class IClassPro:
         daystr: str,
         student_id: int,
         class_index: int,
+        class_url: str = "",
     ) -> None:
-        """Finds and adds a single class to the cart."""
-        self._open_class_detail_page(
-            location=location,
-            timestr=timestr,
-            daystr=daystr,
-            student_id=student_id,
-            class_index=class_index,
-        )
+        """Finds and adds a single class to the cart.
+
+        Uses schedule URL when present, otherwise resolves from search page.
+        """
+        schedule_url = (class_url or "").strip()
+        if "/class-details/" in schedule_url:
+            logger.info(f"Using class details URL from schedule: {schedule_url}")
+            self._goto(schedule_url, description="class detail page")
+        else:
+            self._open_class_detail_page(
+                location=location,
+                timestr=timestr,
+                daystr=daystr,
+                student_id=student_id,
+                class_index=class_index,
+            )
         self._wait_for_class_detail_ready()
         self._add_current_class_to_cart(class_index=class_index)
 
@@ -616,24 +694,524 @@ class IClassPro:
         if idem_state == "already_in_cart":
             raise EnrollmentSkipped("Class is already in the cart.")
 
-        enroll_pattern = re.compile(r"Enroll Now!?", re.IGNORECASE)
+        enroll_pattern = re.compile(r"Enroll Now!?|Enroll", re.IGNORECASE)
         add_to_cart_pattern = re.compile(r"Add to Cart", re.IGNORECASE)
 
-        def click_enroll_now():
-            btn = self.page.get_by_role("button", name=enroll_pattern).first
-            btn.scroll_into_view_if_needed(timeout=10000)
-            btn.wait_for(state="visible", timeout=20000)
-            btn.click(timeout=15000)
+        # Detail pages can render headers quickly while action controls lag
+        # behind significantly.
+        controls_deadline = time.time() + self._class_detail_timeout_ms / 1000.0
+        while time.time() < controls_deadline:
+            try:
+                if self.page.get_by_role(
+                    "button", name=re.compile(r"Select Students", re.IGNORECASE)
+                ).first.is_visible():
+                    break
+            except Exception:
+                pass
+            try:
+                if self.page.get_by_role(
+                    "button", name=enroll_pattern
+                ).first.is_visible():
+                    break
+            except Exception:
+                pass
+            try:
+                if self.page.get_by_role(
+                    "button", name=add_to_cart_pattern
+                ).first.is_visible():
+                    break
+            except Exception:
+                pass
+            self.page.wait_for_timeout(400)
 
-        _retry(click_enroll_now, action_name="Click 'Enroll Now'", attempts=3)
+        def dismiss_non_enrollment_modals() -> None:
+            # Dismiss common marketing/system dialogs that can block controls.
+            dismiss_texts = [
+                "Maybe Later",
+                "Close",
+                "No",
+                "Great!",
+                "Cancel",
+                "Got It!",
+            ]
+            for text in dismiss_texts:
+                try:
+                    btn = self.page.get_by_role(
+                        "button",
+                        name=re.compile(rf"^{re.escape(text)}$", re.IGNORECASE),
+                    ).first
+                    if btn.is_visible():
+                        btn.click(timeout=5000)
+                        self.page.wait_for_timeout(400)
+                except Exception:
+                    pass
+            # Some portals show a persistent welcome modal after login that
+            # intercepts all pointer events until explicitly dismissed.
+            try:
+                welcome_modal = self.page.locator(
+                    ".modal-welcome.show, .modal-welcome.fade.show"
+                ).first
+                if welcome_modal.count() > 0 and welcome_modal.is_visible():
+                    for selector in [
+                        ".modal-welcome.show button:has-text('Got It!')",
+                        ".modal-welcome.show button:has-text('Close')",
+                        ".modal-welcome.show .close",
+                    ]:
+                        try:
+                            ctl = self.page.locator(selector).first
+                            if ctl.count() > 0 and ctl.is_visible():
+                                ctl.click(timeout=5000)
+                                self.page.wait_for_timeout(350)
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        def ensure_student_selected() -> None:
+            # Some class detail pages require explicit student selection before
+            # showing Enroll/Add controls, even with selectedStudents in URL.
+            opened_modal = False
+            detail_url_before_select = self.page.url if self.page else ""
+            try:
+                triggers = [
+                    self.page.get_by_role(
+                        "button",
+                        name=re.compile(r"Select Students", re.IGNORECASE),
+                    ).first,
+                    self.page.locator("button:has-text('Select Students')").first,
+                    self.page.locator("a:has-text('Select Students')").first,
+                ]
+                trigger = None
+                for t in triggers:
+                    try:
+                        if t.count() > 0 and t.is_visible():
+                            trigger = t
+                            break
+                    except Exception:
+                        pass
+                if trigger is None:
+                    return
+
+                try:
+                    trigger.click(timeout=12000)
+                except Exception:
+                    # Last resort for heavily scripted controls.
+                    trigger.evaluate("(el) => el.click()")
+
+                try:
+                    self.page.locator(".modal.show, .modal.in").first.wait_for(
+                        state="visible", timeout=15000
+                    )
+                    opened_modal = True
+                except Exception:
+                    # Some tenant flows redirect to login before student
+                    # selection. Re-authenticate and continue.
+                    current_url = self.page.url if self.page else ""
+                    if "/login" in (current_url or ""):
+                        logger.info(
+                            "Select Students triggered login gate; re-authenticating."
+                        )
+                        if self._login_email and self._login_password:
+                            self._login_impl(self._login_email, self._login_password)
+                            dismiss_non_enrollment_modals()
+                            self._wait_for_portal_idle(
+                                timeout=self._class_detail_timeout_ms
+                            )
+                            post_login_url = self.page.url if self.page else ""
+                            logger.info(
+                                f"Post-login URL after Select Students gate: {post_login_url}"
+                            )
+                            if "/login" in (
+                                post_login_url or ""
+                            ) and "nextQueryParams=" in (post_login_url or ""):
+                                try:
+                                    qs = parse_qs(urlparse(post_login_url).query)
+                                    next_raw = unquote(qs.get("next", [""])[0] or "")
+                                    nqp_raw = qs.get("nextQueryParams", [""])[0]
+                                    nqp = (
+                                        json.loads(unquote(nqp_raw)) if nqp_raw else {}
+                                    )
+                                    next_path = str(
+                                        nqp.get("next") or next_raw or ""
+                                    ).lstrip("/")
+                                    filters_payload = str(nqp.get("filters") or "")
+                                    filters_obj = (
+                                        json.loads(filters_payload)
+                                        if filters_payload
+                                        else {}
+                                    )
+                                    students_token = str(
+                                        nqp.get("students")
+                                        or filters_obj.get("students")
+                                        or "7268"
+                                    )
+                                    if next_raw.startswith(
+                                        "scaq/enroll/select-students"
+                                    ):
+                                        next_details = str(nqp.get("next") or "")
+                                        select_students_url = (
+                                            self.base_url.rstrip("/")
+                                            + "/enroll/select-students"
+                                            + f"?next={quote(next_details)}"
+                                        )
+                                        if nqp_raw:
+                                            select_students_url += f"&nextQueryParams={quote(unquote(nqp_raw))}"
+                                        logger.info(
+                                            f"Following select-students next flow URL: {select_students_url}"
+                                        )
+                                        self._goto(
+                                            select_students_url,
+                                            description="select-students flow after login",
+                                        )
+                                        self._wait_for_portal_idle(
+                                            timeout=self._class_detail_timeout_ms
+                                        )
+                                        for text in ("Continue", "Great!", "Close"):
+                                            try:
+                                                btn = self.page.get_by_role(
+                                                    "button",
+                                                    name=re.compile(
+                                                        rf"^{re.escape(text)}$",
+                                                        re.IGNORECASE,
+                                                    ),
+                                                ).first
+                                                if btn.is_visible():
+                                                    btn.click(timeout=7000)
+                                                    self._wait_for_portal_idle(
+                                                        timeout=self._class_detail_timeout_ms
+                                                    )
+                                            except Exception:
+                                                pass
+                                    elif next_path.startswith("class-details/"):
+                                        target = (
+                                            self.base_url.rstrip("/")
+                                            + "/"
+                                            + next_path
+                                            + f"?selectedStudents={students_token}"
+                                        )
+                                        if filters_payload:
+                                            target += (
+                                                f"&filters={quote(filters_payload)}"
+                                            )
+                                        self._goto(
+                                            target,
+                                            description="class detail from login nextQueryParams",
+                                        )
+                                        self._wait_for_portal_idle(
+                                            timeout=self._class_detail_timeout_ms
+                                        )
+                                        post_login_url = (
+                                            self.page.url
+                                            if self.page
+                                            else post_login_url
+                                        )
+                                except Exception as e:
+                                    logger.debug(
+                                        f"Failed to recover class-detail URL from login nextQueryParams: {e}"
+                                    )
+                            # Prefer portal-native "next" flow first. Fall back
+                            # to class-details if the app does not route there.
+                            if (
+                                detail_url_before_select
+                                and "class-details" in detail_url_before_select
+                                and "/enroll/select-students"
+                                not in (post_login_url or "")
+                                and "/class-details/" not in (post_login_url or "")
+                            ):
+                                self._goto(
+                                    detail_url_before_select,
+                                    description="class detail after login gate",
+                                )
+                            self._wait_for_class_detail_ready()
+                            self._wait_for_portal_idle(
+                                timeout=self._class_detail_timeout_ms
+                            )
+                        return
+                    # Some pages swap content inline without opening bootstrap
+                    # modal; continue with generic selection attempts.
+                    self._write_debug_artifacts(
+                        "select_students_modal_not_visible",
+                        {
+                            "class_index": class_index,
+                            "page_url": self.page.url if self.page else "",
+                        },
+                    )
+                    return
+            except Exception:
+                return
+
+            # Try selecting at least one student in the modal.
+            picked_student = False
+            try:
+                scope = ".modal.show, .modal.in" if opened_modal else "body"
+                option = self.page.locator(
+                    f"{scope} input[type='checkbox'], {scope} input[type='radio']"
+                ).first
+                if option.count() > 0:
+                    option.check(timeout=5000)
+                    picked_student = True
+            except Exception:
+                pass
+
+            if not picked_student:
+                # Fallback for card/list style student selectors with no direct
+                # checkbox/radio controls.
+                try:
+                    picked_student = bool(
+                        self.page.evaluate(
+                            r"""() => {
+                                const modal = document.querySelector('.modal.show, .modal.in');
+                                if (!modal) return false;
+                                const isVisible = (el) => {
+                                    if (!el) return false;
+                                    const style = window.getComputedStyle(el);
+                                    return (
+                                        style.display !== 'none' &&
+                                        style.visibility !== 'hidden' &&
+                                        (el.offsetWidth > 0 || el.offsetHeight > 0)
+                                    );
+                                };
+                                const candidates = Array.from(
+                                    modal.querySelectorAll(
+                                        "[data-student-id], .card, .list-group-item, label, button"
+                                    )
+                                ).filter(isVisible);
+                                for (const el of candidates) {
+                                    const txt = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                                    if (!txt) continue;
+                                    if (txt.includes('close') || txt.includes('cancel') || txt.includes('continue')) continue;
+                                    el.click();
+                                    return true;
+                                }
+                                return false;
+                            }"""
+                        )
+                    )
+                except Exception:
+                    picked_student = False
+
+            # Confirm selection.
+            for action in ("Continue", "Apply", "Done", "Save", "Close"):
+                try:
+                    if opened_modal:
+                        btn = self.page.locator(
+                            f".modal.show button:has-text('{action}'), .modal.in button:has-text('{action}')"
+                        ).first
+                    else:
+                        btn = self.page.locator(f"button:has-text('{action}')").first
+                    if btn.count() > 0 and btn.is_visible():
+                        btn.click(timeout=7000)
+                        self._wait_for_portal_idle(timeout=15000)
+                        return
+                except Exception:
+                    pass
+
+            self._write_debug_artifacts(
+                "select_students_confirm_missing",
+                {
+                    "class_index": class_index,
+                    "page_url": self.page.url if self.page else "",
+                    "picked_student": picked_student,
+                },
+            )
+
+        def ensure_authenticated_detail_view() -> None:
+            # Occasionally we land on class-details in a public/guest view
+            # (Register/Log In links visible), which has no enroll controls.
+            try:
+                register_link = self.page.get_by_role(
+                    "link", name=re.compile(r"^Register$", re.IGNORECASE)
+                ).first
+                login_link = self.page.get_by_role(
+                    "link", name=re.compile(r"^Log In$", re.IGNORECASE)
+                ).first
+                if not (register_link.is_visible() and login_link.is_visible()):
+                    return
+            except Exception:
+                return
+
+            logger.info(
+                "Detected guest class-details view; re-authenticating and reloading detail page."
+            )
+            if self._login_email and self._login_password:
+                detail_url = self.page.url if self.page else ""
+                self._login_impl(self._login_email, self._login_password)
+                dismiss_non_enrollment_modals()
+                if detail_url and "/class-details/" in detail_url:
+                    self._goto(
+                        detail_url, description="authenticated class detail view"
+                    )
+                    self._wait_for_class_detail_ready()
+                    self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
+
+        # Some class detail pages present Add to Cart directly without a
+        # separate Enroll Now gate. Prefer direct Add to Cart if visible.
+        dismiss_non_enrollment_modals()
+        ensure_authenticated_detail_view()
+        add_to_cart_role = self.page.get_by_role(
+            "button", name=add_to_cart_pattern
+        ).first
+        add_to_cart_text = self.page.locator("button:has-text('Add to Cart')").first
+        enroll_role = self.page.get_by_role("button", name=enroll_pattern).first
+        enroll_now_text = self.page.locator("button:has-text('Enroll Now')").first
+
+        direct_add_visible = False
+        for add_locator in (add_to_cart_role, add_to_cart_text):
+            try:
+                if add_locator.is_visible():
+                    direct_add_visible = True
+                    break
+            except Exception:
+                pass
+
+        enroll_visible = False
+        for enroll_locator in (enroll_role, enroll_now_text):
+            try:
+                if enroll_locator.is_visible():
+                    enroll_visible = True
+                    break
+            except Exception:
+                pass
+
+        # Only force Select Students flow when neither Add to Cart nor Enroll
+        # controls are currently visible.
+        if not direct_add_visible and not enroll_visible:
+            ensure_student_selected()
+            ensure_authenticated_detail_view()
+            dismiss_non_enrollment_modals()
+            for add_locator in (add_to_cart_role, add_to_cart_text):
+                try:
+                    if add_locator.is_visible():
+                        direct_add_visible = True
+                        break
+                except Exception:
+                    pass
+
+        if not direct_add_visible:
+
+            def click_enroll_now():
+                # Some portals require opening the "View Available Dates" modal
+                # before any enroll/add controls are rendered.
+                last_error = None
+                for pass_idx in range(2):
+                    try:
+                        view_dates = self.page.locator(
+                            "a:has-text('View Available Dates')"
+                        ).first
+                        if view_dates.is_visible():
+                            view_dates.click(timeout=20000)
+                            self._wait_for_portal_idle(
+                                timeout=self._class_detail_timeout_ms
+                            )
+                    except Exception:
+                        pass
+
+                    dismiss_non_enrollment_modals()
+                    candidates = [
+                        self.page.get_by_role("button", name=enroll_pattern).first,
+                        self.page.locator(
+                            "customer-portal-class-details button:has-text('Enroll Now')"
+                        ).first,
+                        self.page.locator("button:has-text('Enroll Now')").first,
+                        self.page.locator("a:has-text('Enroll Now')").first,
+                        # Modal/session-specific controls
+                        self.page.locator(
+                            ".modal-view-dates button:has-text('Enroll')"
+                        ).first,
+                        self.page.locator(
+                            ".modal-view-dates a:has-text('Enroll')"
+                        ).first,
+                        self.page.locator(
+                            ".modal-view-dates button:has-text('Add to Cart')"
+                        ).first,
+                        # Some flows require a modal "Continue" before rendering
+                        # Add to Cart controls.
+                        self.page.locator(
+                            ".modal.show button:has-text('Continue')"
+                        ).first,
+                    ]
+                    saw_candidate = False
+                    for ctl in candidates:
+                        try:
+                            if ctl.count() == 0:
+                                continue
+                            saw_candidate = True
+                            ctl.scroll_into_view_if_needed(timeout=15000)
+                            ctl.wait_for(state="visible", timeout=10000)
+                            ctl.click(timeout=20000)
+                            return
+                        except Exception as e:
+                            last_error = e
+
+                    if (
+                        pass_idx == 0
+                        and not saw_candidate
+                        and "/class-details/" in (self.page.url or "")
+                    ):
+                        logger.info(
+                            "No enrollment controls rendered; reloading class-details once."
+                        )
+                        self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                        self._wait_for_portal_idle(
+                            timeout=self._class_detail_timeout_ms
+                        )
+                        continue
+                # Persist a focused artifact when enroll controls are missing.
+                try:
+                    button_samples = self.page.locator("button").all_inner_texts()[:40]
+                except Exception:
+                    button_samples = []
+                try:
+                    link_samples = self.page.locator("a").all_inner_texts()[:60]
+                except Exception:
+                    link_samples = []
+                self._write_debug_artifacts(
+                    "enroll_control_missing",
+                    {
+                        "class_index": class_index,
+                        "page_url": self.page.url if self.page else "",
+                        "buttons": button_samples,
+                        "links": link_samples,
+                        "error": str(last_error) if last_error else "unknown",
+                    },
+                )
+                raise last_error or RuntimeError("No clickable enroll control found.")
+
+            _retry(
+                click_enroll_now,
+                action_name="Click enrollment control",
+                attempts=3,
+                base_delay=1.5,
+                max_delay=6.0,
+            )
 
         initial_cart_count = self._get_cart_item_count()
 
         def click_add_to_cart():
-            btn = self.page.get_by_role("button", name=add_to_cart_pattern).first
-            btn.scroll_into_view_if_needed(timeout=10000)
-            btn.wait_for(state="visible", timeout=20000)
-            btn.click(timeout=15000)
+            candidates = [
+                self.page.get_by_role("button", name=add_to_cart_pattern).first,
+                self.page.locator("button:has-text('Add to Cart')").first,
+                self.page.locator("a:has-text('Add to Cart')").first,
+            ]
+            last_error = None
+            for btn in candidates:
+                try:
+                    btn.scroll_into_view_if_needed(timeout=15000)
+                    btn.click(timeout=20000)
+                    return
+                except Exception as e:
+                    last_error = e
+            # Persist a focused artifact when the enrollment controls are missing.
+            self._write_debug_artifacts(
+                "add_to_cart_control_missing",
+                {
+                    "class_index": class_index,
+                    "page_url": self.page.url if self.page else "",
+                    "error": str(last_error) if last_error else "unknown",
+                },
+            )
+            raise last_error or RuntimeError("No clickable Add to Cart control found.")
 
         _retry(click_add_to_cart, action_name="Click 'Add to Cart'", attempts=3)
         self.page.wait_for_timeout(1500)
@@ -648,6 +1226,21 @@ class IClassPro:
         final_cart_count = self._wait_for_cart_item_count(
             min_count=initial_cart_count + 1
         )
+        if final_cart_count < initial_cart_count + 1:
+            # Fallback: some tenant UIs do not expose cart line items on the
+            # class-details page even after successful enrollment.
+            try:
+                cart_url = self.base_url.rstrip("/") + "/cart"
+                self._goto(cart_url, description="cart verification")
+                self._wait_for_portal_idle(timeout=15000)
+                final_cart_count = self._get_cart_item_count()
+                if final_cart_count >= initial_cart_count + 1:
+                    logger.info(
+                        f"Verified cart item count on cart page: {final_cart_count}."
+                    )
+            except Exception as e:
+                logger.debug(f"Cart-page verification fallback failed: {e}")
+
         if final_cart_count < initial_cart_count + 1:
             enrollment_issue = self._get_enrollment_issue()
             if enrollment_issue:
@@ -679,7 +1272,12 @@ class IClassPro:
         booking_url = f"{self.base_url}classes?q={location.replace(' ', '%20')}{day_query}{student_query}"
 
         self._goto(booking_url, description="class search results")
+        self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
         self.take_screenshot(f"classes_page_{class_index}.png", full_page=True)
+        # For class-details URLs, use the configured student ID directly.
+        # Some internal telemetry endpoints expose other numeric tokens, but
+        # using those in selectedStudents can put the page into the wrong state.
+        selected_student_token = str(student_id)
 
         # Find the link for the class time, waiting for it to appear
         class_link = self.page.locator(f"a:has-text('at {timestr}')")
@@ -689,8 +1287,9 @@ class IClassPro:
         observed_request_urls = []
         debug_snapshot = {}
         try:
-            # Wait for at least one to be visible
+            # Wait for at least one to be visible and actionable.
             class_link.first.wait_for(state="visible", timeout=20000)
+            self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
 
             # If there are multiple (e.g., this week and next week), pick the last one.
             # Where possible, resolve the underlying `/class-details/<id>` URL and open
@@ -699,6 +1298,142 @@ class IClassPro:
             logger.info(
                 f"Found {count} class link(s) for {timestr}. Opening the latest matching details view."
             )
+
+            # Primary no-click resolver: ask the open classes API for matching
+            # classes and use classId directly. This avoids brittle SPA click
+            # behavior entirely on portals where class cards use href="#".
+            try:
+                api_candidate_ids = (
+                    self.page.evaluate(
+                        r"""async ([locationName, timeStr, dayIdx]) => {
+                        const norm = (v) => String(v || '').toLowerCase();
+                        const orgSlug = (window.location.pathname.split('/').filter(Boolean)[0] || '').trim();
+                        if (!orgSlug) return [];
+
+                        const toEntries = (node, out = []) => {
+                            if (Array.isArray(node)) {
+                                for (const item of node) toEntries(item, out);
+                                return out;
+                            }
+                            if (node && typeof node === 'object') {
+                                out.push(node);
+                                for (const key of Object.keys(node)) {
+                                    toEntries(node[key], out);
+                                }
+                            }
+                            return out;
+                        };
+
+                        const timeNeedle = norm(timeStr).replace(/\s+/g, '');
+                        const locationNeedle = norm(locationName);
+
+                        let locationId = null;
+                        try {
+                            const locResp = await fetch(`https://app.iclasspro.com/api/open/v1/${orgSlug}/locations`, { credentials: 'include' });
+                            if (locResp.ok) {
+                                const locJson = await locResp.json();
+                                const locEntries = toEntries(locJson);
+                                const best = locEntries.find((x) => {
+                                    const name = norm(x?.name || x?.locationName || x?.title || '');
+                                    return name && (name === locationNeedle || name.includes(locationNeedle));
+                                });
+                                if (best) {
+                                    locationId = best.id || best.locationId || best.locationID || null;
+                                }
+                            }
+                        } catch (e) {}
+
+                        const params = new URLSearchParams();
+                        params.set('q', locationName || '');
+                        params.set('days', String(dayIdx || ''));
+                        params.set('limit', '80');
+                        params.set('page', '1');
+                        if (locationId) params.set('locationId', String(locationId));
+
+                        const clsResp = await fetch(
+                            `https://app.iclasspro.com/api/open/v1/${orgSlug}/classes?${params.toString()}`,
+                            { credentials: 'include' }
+                        );
+                        if (!clsResp.ok) return [];
+                        const clsJson = await clsResp.json();
+                        const entries = toEntries(clsJson);
+                        const matches = [];
+                        for (const entry of entries) {
+                            const classId = entry?.classId || entry?.classID || entry?.id || null;
+                            if (!classId) continue;
+                            const text = norm(JSON.stringify(entry)).replace(/\s+/g, '');
+                            if (!text.includes(locationNeedle.replace(/\s+/g, ''))) continue;
+                            if (!text.includes(timeNeedle)) continue;
+                            matches.push(String(classId));
+                        }
+                        return Array.from(new Set(matches));
+                    }""",
+                        [location, timestr, day_index],
+                    )
+                    or []
+                )
+                if api_candidate_ids:
+                    logger.info(
+                        f"Resolved {len(api_candidate_ids)} class ID candidate(s) from open classes API."
+                    )
+                    candidate_ids.extend(api_candidate_ids)
+            except Exception as api_error:
+                logger.debug(
+                    f"Open classes API class-id resolution unavailable: {api_error}"
+                )
+
+            # Portal-specific fast path: card anchors are often href="#", and the
+            # true class resolution happens via "View Available Dates" modal/API.
+            # Try harvesting class IDs from the sessions API triggered by that link.
+            try:
+                sessions_candidate_ids = []
+
+                def _collect_ids_from_payload(node):
+                    out = []
+                    if isinstance(node, dict):
+                        payload_text = json.dumps(node).lower()
+                        class_id = (
+                            node.get("classId")
+                            or node.get("classID")
+                            or node.get("class_id")
+                        )
+                        if class_id and str(class_id).isdigit():
+                            out.append((str(class_id), payload_text))
+                        for value in node.values():
+                            out.extend(_collect_ids_from_payload(value))
+                    elif isinstance(node, list):
+                        for item in node:
+                            out.extend(_collect_ids_from_payload(item))
+                    return out
+
+                with self.page.expect_response(
+                    re.compile(r"/api/open/v1/.*/sessions"), timeout=12000
+                ) as sessions_resp:
+                    class_link.last.evaluate(
+                        r"""el => {
+                            const card = el.closest('article') || el;
+                            const trigger = card.querySelector("a[data-target*='modal-view-dates'], a.text-link");
+                            if (trigger) trigger.click();
+                            else el.click();
+                        }"""
+                    )
+                payload = sessions_resp.value.json()
+                for class_id, payload_text in _collect_ids_from_payload(payload):
+                    if (
+                        timestr.strip().lower() in payload_text
+                        and location.strip().lower() in payload_text
+                    ):
+                        sessions_candidate_ids.append(class_id)
+                sessions_candidate_ids = list(dict.fromkeys(sessions_candidate_ids))
+                if sessions_candidate_ids:
+                    logger.info(
+                        f"Resolved {len(sessions_candidate_ids)} class ID candidate(s) from sessions API."
+                    )
+                    candidate_ids.extend(sessions_candidate_ids)
+            except Exception as sessions_error:
+                logger.debug(
+                    f"Sessions API class-id resolution unavailable: {sessions_error}"
+                )
 
             detail_href = class_link.last.evaluate(
                 r"""el => {
@@ -756,13 +1491,13 @@ class IClassPro:
                 filters_json = json.dumps(
                     {
                         "q": location,
-                        "students": str(student_id),
+                        "students": str(selected_student_token),
                         "days": str(day_index),
                     }
                 )
                 class_url = (
                     f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
-                    f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                    f"?selectedStudents={selected_student_token}&filters={quote(filters_json)}"
                 )
                 logger.info(f"Opening class detail URL directly: {class_url}")
                 self._goto(class_url, description="class detail page")
@@ -775,7 +1510,7 @@ class IClassPro:
             # the filtered results page. Some portal variants render links that
             # are not DOM-near the time anchor and don't respond to synthetic
             # click/navigation events.
-            candidate_ids = (
+            dom_candidate_ids = (
                 self.page.evaluate(
                     r"""([timeStr]) => {
                     const target = String(timeStr || '').toLowerCase();
@@ -817,6 +1552,7 @@ class IClassPro:
                 )
                 or []
             )
+            candidate_ids = list(dict.fromkeys(candidate_ids + dom_candidate_ids))
             if not candidate_ids:
                 # Some pages hide the actual class-details links behind a
                 # "View Available Dates" action. Expand those cards first, then
@@ -846,7 +1582,7 @@ class IClassPro:
                     [timestr],
                 )
                 self.page.wait_for_timeout(800)
-                candidate_ids = (
+                dom_candidate_ids = (
                     self.page.evaluate(
                         r"""([timeStr]) => {
                         const target = String(timeStr || '').toLowerCase();
@@ -888,6 +1624,7 @@ class IClassPro:
                     )
                     or []
                 )
+                candidate_ids = list(dict.fromkeys(candidate_ids + dom_candidate_ids))
                 if candidate_ids:
                     logger.info(
                         "Resolved class-details candidates after expanding 'View Available Dates'."
@@ -896,7 +1633,7 @@ class IClassPro:
                 filters_json = json.dumps(
                     {
                         "q": location,
-                        "students": str(student_id),
+                        "students": str(selected_student_token),
                         "days": str(day_index),
                     }
                 )
@@ -906,11 +1643,13 @@ class IClassPro:
                 for class_id in candidate_ids[:6]:
                     class_url = (
                         f"{self.base_url.rstrip('/')}/class-details/{class_id}"
-                        f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                        f"?selectedStudents={selected_student_token}&filters={quote(filters_json)}"
                     )
                     try:
                         self._goto(class_url, description="class detail page")
-                        self._wait_for_class_detail_ready(timeout=10000)
+                        self._wait_for_class_detail_ready(
+                            timeout=self._class_detail_timeout_ms
+                        )
                         logger.info(
                             f"Opened class detail directly from candidate link: {class_url}"
                         )
@@ -921,8 +1660,11 @@ class IClassPro:
                             f"Candidate class-details URL did not open cleanly ({class_url}): {candidate_error}"
                         )
                         self._goto(booking_url, description="class search results")
+                        self._wait_for_portal_idle(
+                            timeout=self._class_detail_timeout_ms
+                        )
                         class_link = self.page.locator(f"a:has-text('at {timestr}')")
-                        class_link.first.wait_for(state="visible", timeout=10000)
+                        class_link.first.wait_for(state="visible", timeout=30000)
 
             if not candidate_ids:
                 # Last URL-based recovery: scan the full rendered HTML (including
@@ -953,7 +1695,7 @@ class IClassPro:
                     filters_json = json.dumps(
                         {
                             "q": location,
-                            "students": str(student_id),
+                            "students": str(selected_student_token),
                             "days": str(day_index),
                         }
                     )
@@ -963,11 +1705,13 @@ class IClassPro:
                     for class_id in html_ids[:8]:
                         class_url = (
                             f"{self.base_url.rstrip('/')}/class-details/{class_id}"
-                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                            f"?selectedStudents={selected_student_token}&filters={quote(filters_json)}"
                         )
                         try:
                             self._goto(class_url, description="class detail page")
-                            self._wait_for_class_detail_ready(timeout=10000)
+                            self._wait_for_class_detail_ready(
+                                timeout=self._class_detail_timeout_ms
+                            )
                             logger.info(
                                 f"Opened class detail directly from page HTML match: {class_url}"
                             )
@@ -978,10 +1722,13 @@ class IClassPro:
                                 f"HTML-derived class-details URL did not open cleanly ({class_url}): {html_candidate_error}"
                             )
                             self._goto(booking_url, description="class search results")
+                            self._wait_for_portal_idle(
+                                timeout=self._class_detail_timeout_ms
+                            )
                             class_link = self.page.locator(
                                 f"a:has-text('at {timestr}')"
                             )
-                            class_link.first.wait_for(state="visible", timeout=10000)
+                            class_link.first.wait_for(state="visible", timeout=30000)
 
             if not candidate_ids:
                 # Some portal builds expose only raw class IDs (e.g. classId)
@@ -1018,7 +1765,7 @@ class IClassPro:
                     filters_json = json.dumps(
                         {
                             "q": location,
-                            "students": str(student_id),
+                            "students": str(selected_student_token),
                             "days": str(day_index),
                         }
                     )
@@ -1033,11 +1780,13 @@ class IClassPro:
                     for class_id in raw_ids[:20]:
                         class_url = (
                             f"{self.base_url.rstrip('/')}/class-details/{class_id}"
-                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                            f"?selectedStudents={selected_student_token}&filters={quote(filters_json)}"
                         )
                         try:
                             self._goto(class_url, description="class detail page")
-                            self._wait_for_class_detail_ready(timeout=7000)
+                            self._wait_for_class_detail_ready(
+                                timeout=self._class_detail_timeout_ms
+                            )
                             body_text = (
                                 self.page.locator("body")
                                 .inner_text(timeout=3000)
@@ -1052,8 +1801,11 @@ class IClassPro:
                         except Exception as raw_id_error:
                             last_error = raw_id_error
                         self._goto(booking_url, description="class search results")
+                        self._wait_for_portal_idle(
+                            timeout=self._class_detail_timeout_ms
+                        )
                         class_link = self.page.locator(f"a:has-text('at {timestr}')")
-                        class_link.first.wait_for(state="visible", timeout=10000)
+                        class_link.first.wait_for(state="visible", timeout=30000)
 
             for attempt_label, use_force, use_js in (
                 ("standard click", False, False),
@@ -1083,7 +1835,9 @@ class IClassPro:
                     else:
                         class_link.last.click(timeout=15000, force=use_force)
                     try:
-                        self._wait_for_class_detail_ready(timeout=10000)
+                        self._wait_for_class_detail_ready(
+                            timeout=self._class_detail_timeout_ms
+                        )
                         return
                     except Exception as click_wait_error:
                         # Some portal variants don't navigate, but they do fire
@@ -1098,19 +1852,21 @@ class IClassPro:
                             filters_json = json.dumps(
                                 {
                                     "q": location,
-                                    "students": str(student_id),
+                                    "students": str(selected_student_token),
                                     "days": str(day_index),
                                 }
                             )
                             captured_url = (
                                 f"{self.base_url.rstrip('/')}/class-details/{captured_id}"
-                                f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+                                f"?selectedStudents={selected_student_token}&filters={quote(filters_json)}"
                             )
                             logger.info(
                                 "Recovered class details URL from click-triggered network request."
                             )
                             self._goto(captured_url, description="class detail page")
-                            self._wait_for_class_detail_ready(timeout=10000)
+                            self._wait_for_class_detail_ready(
+                                timeout=self._class_detail_timeout_ms
+                            )
                             return
                         raise click_wait_error
                 except Exception as attempt_error:
@@ -1119,8 +1875,9 @@ class IClassPro:
                         f"Class detail did not open via {attempt_label}; retrying if possible."
                     )
                     self._goto(booking_url, description="class search results")
+                    self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
                     class_link = self.page.locator(f"a:has-text('at {timestr}')")
-                    class_link.first.wait_for(state="visible", timeout=10000)
+                    class_link.first.wait_for(state="visible", timeout=30000)
                 finally:
                     if _capture_request is not None:
                         try:
@@ -1393,6 +2150,22 @@ class IClassPro:
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             self.page.wait_for_timeout(1000)
             self.take_screenshot(f"scrape_{day_name.lower()}.png", full_page=True)
+            if self._deep_debug:
+                try:
+                    raw_anchor_count = self.page.locator("a").count()
+                except Exception:
+                    raw_anchor_count = -1
+                self._write_debug_artifacts(
+                    f"scrape_day_{day_name.lower()}",
+                    {
+                        "mode": "scrape",
+                        "day": day_name,
+                        "day_index": day_idx,
+                        "url": url,
+                        "student_id": student_id,
+                        "raw_anchor_count": raw_anchor_count,
+                    },
+                )
 
             # Strategy: iterate every anchor on the page and keep only those
             # whose text contains a time pattern (e.g. "at 10:30am").  These
@@ -1763,6 +2536,14 @@ def main():
     logger.info(f"Starting iClassPro enrollment bot for email: {args.email}")
     logger.info(f"Password: {'*' * len(args.password) if args.password else 'Not set'}")
     logger.info(f"Student ID: {args.student_id}")
+    logger.info(f"Deep debug enabled: {bool(args.deep_debug)}")
+    logger.info(
+        f"Send email enabled (effective): {bool(args.send_email and not args.scrape)}"
+    )
+    logger.info(
+        "Class detail readiness timeout (ms): "
+        f"{os.getenv('ICLASS_CLASS_DETAIL_TIMEOUT_MS', '45000')}"
+    )
 
     driver = IClassPro(
         base_url=args.base_url,
@@ -1819,28 +2600,18 @@ def main():
                 logger.info(
                     f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
                 )
-                used_path = "fallback_search"
+                used_path = "auto"
                 try:
                     class_url = str(class_info.get("url") or "").strip()
-                    if "/class-details/" in class_url:
-                        used_path = "url"
-                        logger.info(
-                            f"Using class details URL from schedule for class {i+1}: {class_url}"
-                        )
-                        driver.enroll_by_url(url=class_url, class_index=i)
-                    else:
-                        logger.info(
-                            f"Class {i+1} has no usable URL; falling back to search-and-click."
-                        )
-                        driver.enroll(
-                            location=class_info.get("Location")
-                            or class_info.get("location", ""),
-                            timestr=class_info.get("Time")
-                            or class_info.get("time", ""),
-                            daystr=class_info.get("Day") or class_info.get("day", ""),
-                            student_id=args.student_id,
-                            class_index=i,
-                        )
+                    driver.enroll(
+                        location=class_info.get("Location")
+                        or class_info.get("location", ""),
+                        timestr=class_info.get("Time") or class_info.get("time", ""),
+                        daystr=class_info.get("Day") or class_info.get("day", ""),
+                        student_id=args.student_id,
+                        class_index=i,
+                        class_url=class_url,
+                    )
                     summary_data.append(
                         {
                             "class": class_info,

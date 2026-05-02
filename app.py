@@ -45,6 +45,23 @@ os.makedirs("schedules/tmp", exist_ok=True)
 templates = Jinja2Templates(directory="templates")
 
 
+def _as_bool(value, default: bool = False) -> bool:
+    """Normalize possibly-string/number booleans from websocket payloads."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off", ""):
+            return False
+    return default
+
+
 def _load_locations() -> list:
     """Load the known locations list from config/locations.yaml."""
     config_path = os.path.join(os.path.dirname(__file__), "config", "locations.yaml")
@@ -184,8 +201,9 @@ async def websocket_scrape(websocket: WebSocket):
         student_id = config.get("student_id", "")
         scrape_days = config.get("scrape_days", "")
         scrape_locations = config.get("scrape_locations", "")
-        deep_scrape = config.get("deep_scrape", False)
-        deep_debug = config.get("deep_debug", False)
+        deep_scrape = _as_bool(config.get("deep_scrape", False))
+        deep_debug = _as_bool(config.get("deep_debug", False))
+        send_email = _as_bool(config.get("send_email", False))
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -215,11 +233,16 @@ async def websocket_scrape(websocket: WebSocket):
         if deep_debug:
             cmd_args.append("--deep-debug")
 
+        child_env = os.environ.copy()
+        child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
+        child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=child_env,
         )
 
         while True:
@@ -276,9 +299,9 @@ async def websocket_enroll_selected(websocket: WebSocket):
         password = config.get("password", "")
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
-        complete_transaction = config.get("complete_transaction", True)
-        send_email = config.get("send_email", False)
-        deep_debug = config.get("deep_debug", False)
+        complete_transaction = _as_bool(config.get("complete_transaction", True), True)
+        send_email = _as_bool(config.get("send_email", False))
+        deep_debug = _as_bool(config.get("deep_debug", False))
         selected_classes = config.get("selected_classes", [])
 
         if not all([email, password, student_id]):
@@ -322,11 +345,16 @@ async def websocket_enroll_selected(websocket: WebSocket):
         if deep_debug:
             cmd_args.append("--deep-debug")
 
+        child_env = os.environ.copy()
+        child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
+        child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=child_env,
         )
 
         while True:
@@ -395,9 +423,9 @@ async def websocket_endpoint(websocket: WebSocket):
         password = config.get("password", "")
         student_id = config.get("student_id", "")
         promo_code = config.get("promo_code", "")
-        complete_transaction = config.get("complete_transaction", True)
-        send_email = config.get("send_email", False)
-        deep_debug = config.get("deep_debug", False)
+        complete_transaction = _as_bool(config.get("complete_transaction", True), True)
+        send_email = _as_bool(config.get("send_email", False))
+        deep_debug = _as_bool(config.get("deep_debug", False))
         schedule = config.get("schedule", [])
 
         if not all([email, password, student_id]):
@@ -445,11 +473,16 @@ async def websocket_endpoint(websocket: WebSocket):
         if deep_debug:
             cmd_args.append("--deep-debug")
 
+        child_env = os.environ.copy()
+        child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
+        child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             *cmd_args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # Merge stderr into stdout
+            env=child_env,
         )
 
         while True:
