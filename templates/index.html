@@ -32,6 +32,12 @@
             overflow-y: auto;
             background: var(--card-background-color, #fff);
         }
+        .app-shell.sidebar-collapsed .sidebar {
+            display: none;
+        }
+        .app-shell.sidebar-collapsed #sidebar-splitter {
+            display: none;
+        }
 
         .splitter {
             flex: 0 0 var(--splitter-size);
@@ -83,6 +89,19 @@
         .tab-nav {
             display: flex;
             gap: 0;
+        }
+        .layout-controls {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            gap: 0.5rem;
+        }
+        .layout-controls button {
+            width: auto;
+            margin: 0;
+            padding: 0.35rem 0.65rem;
+            font-size: 0.82rem;
         }
         .tab-btn {
             background: none;
@@ -347,6 +366,15 @@
             <header class="page-header">
                 <h1>Enrollment Dashboard</h1>
                 <p class="subtitle">Automate your iClassPro signups</p>
+                <div class="layout-controls">
+                    <button
+                        id="toggle-sidebar-button"
+                        class="secondary outline"
+                        type="button"
+                        onclick="toggleSidebar()"
+                        aria-expanded="true"
+                    >Hide Sidebar</button>
+                </div>
                 <nav class="tab-nav">
                     <button id="tab-btn-manual" class="tab-btn active" onclick="switchTab('manual', this)">Manual Enrollment</button>
                     <button id="tab-btn-discover" class="tab-btn" onclick="switchTab('discover', this)">Discover &amp; Enroll</button>
@@ -522,7 +550,8 @@
         let configSaveDebounceTimer = null;
         const uiStorageKeys = {
             sidebarWidth: 'iclasspro.sidebarWidth',
-            runPanelHeight: 'iclasspro.runPanelHeight'
+            runPanelHeight: 'iclasspro.runPanelHeight',
+            sidebarCollapsed: 'iclasspro.sidebarCollapsed'
         };
 
         function isWorkflowRunning() {
@@ -536,6 +565,9 @@
         // ----- Init -----
         window.onload = function() {
             initResizableLayout();
+            applySidebarCollapsedState(
+                localStorage.getItem(uiStorageKeys.sidebarCollapsed) === '1'
+            );
             renderSidebarSchedulesList();
             setupConfigAutosave();
 
@@ -621,6 +653,22 @@
                     document.body.style.cursor = '';
                 }
             });
+        }
+
+        function applySidebarCollapsedState(collapsed) {
+            const appShell = document.querySelector('.app-shell');
+            const toggleBtn = document.getElementById('toggle-sidebar-button');
+            if (!appShell || !toggleBtn) return;
+            appShell.classList.toggle('sidebar-collapsed', !!collapsed);
+            toggleBtn.innerText = collapsed ? 'Show Sidebar' : 'Hide Sidebar';
+            toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            localStorage.setItem(uiStorageKeys.sidebarCollapsed, collapsed ? '1' : '0');
+        }
+
+        function toggleSidebar() {
+            const appShell = document.querySelector('.app-shell');
+            const collapsed = appShell && appShell.classList.contains('sidebar-collapsed');
+            applySidebarCollapsedState(!collapsed);
         }
 
         function togglePassword() {
