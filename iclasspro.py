@@ -386,21 +386,42 @@ class IClassPro:
                     return True
             except Exception:
                 pass
-            try:
-                register_visible = self.page.get_by_role(
-                    "link", name=re.compile(r"^Register$", re.IGNORECASE)
-                ).first.is_visible()
-                login_visible = self.page.get_by_role(
-                    "link", name=re.compile(r"^Log In$", re.IGNORECASE)
-                ).first.is_visible()
-                if register_visible and login_visible:
-                    return False
-            except Exception:
-                pass
+            if self._has_visible_guest_auth_links():
+                return False
             self.page.locator("text=/My Account/i").first.wait_for(
                 state="visible", timeout=timeout
             )
             return True
+        except Exception:
+            return False
+
+    def _has_visible_guest_auth_links(self) -> bool:
+        """Return True when guest navigation links are visibly present."""
+        try:
+            return bool(
+                self.page.evaluate(
+                    r"""() => {
+                        const isVisible = (el) => {
+                            if (!el) return false;
+                            const style = window.getComputedStyle(el);
+                            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                            const rect = el.getBoundingClientRect();
+                            return rect.width > 0 && rect.height > 0;
+                        };
+                        const links = Array.from(document.querySelectorAll('a, button'));
+                        let registerVisible = false;
+                        let loginVisible = false;
+                        for (const el of links) {
+                            if (!isVisible(el)) continue;
+                            const txt = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                            if (!txt) continue;
+                            if (txt === 'register' || txt === 'register now') registerVisible = true;
+                            if (txt === 'log in' || txt === 'login') loginVisible = true;
+                        }
+                        return registerVisible && loginVisible;
+                    }"""
+                )
+            )
         except Exception:
             return False
 
@@ -649,6 +670,8 @@ class IClassPro:
             r"There is a conflicting enrollment for this student\.",
             r"already enrolled[^.]*\.",
             r"already in (?:your )?cart[^.]*\.",
+            r"already enrolled",
+            r"already in (?:your )?cart",
             r"class is full[^.]*\.",
             r"unable to enroll[^.]*\.",
         ]
@@ -656,6 +679,11 @@ class IClassPro:
             match = re.search(pattern, normalized_text, re.IGNORECASE)
             if match:
                 return match.group(0)
+        lowered = normalized_text.lower()
+        if "already enrolled" in lowered:
+            return "Already enrolled."
+        if "already in your cart" in lowered or "already in cart" in lowered:
+            return "Already in cart."
         return ""
 
     def enroll(
@@ -1020,16 +1048,7 @@ class IClassPro:
         def ensure_authenticated_detail_view() -> None:
             # Occasionally we land on class-details in a public/guest view
             # (Register/Log In links visible), which has no enroll controls.
-            try:
-                register_link = self.page.get_by_role(
-                    "link", name=re.compile(r"^Register$", re.IGNORECASE)
-                ).first
-                login_link = self.page.get_by_role(
-                    "link", name=re.compile(r"^Log In$", re.IGNORECASE)
-                ).first
-                if not (register_link.is_visible() and login_link.is_visible()):
-                    return
-            except Exception:
+            if not self._has_visible_guest_auth_links():
                 return
 
             logger.info(
@@ -1227,6 +1246,9 @@ class IClassPro:
         final_cart_count = self._wait_for_cart_item_count(
             min_count=initial_cart_count + 1
         )
+        logger.info(
+            f"Cart count after add attempt: initial={initial_cart_count}, observed={final_cart_count}"
+        )
         if final_cart_count < initial_cart_count + 1:
             # Fallback: some tenant UIs do not expose cart line items on the
             # class-details page even after successful enrollment.
@@ -1243,6 +1265,11 @@ class IClassPro:
                 logger.debug(f"Cart-page verification fallback failed: {e}")
 
         if final_cart_count < initial_cart_count + 1:
+            idempotency_state = self._detect_idempotency_state()
+            if idempotency_state == "already_enrolled":
+                raise EnrollmentSkipped("Class is already enrolled.")
+            if idempotency_state == "already_in_cart":
+                raise EnrollmentSkipped("Class is already in cart.")
             enrollment_issue = self._get_enrollment_issue()
             if enrollment_issue:
                 lowered = enrollment_issue.lower()
@@ -2475,6 +2502,12 @@ def main():
         help="If set, actually complete the transaction by clicking the 'Complete Transaction' button.",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Force dry-run mode (never click 'Complete Transaction').",
+    )
+    parser.add_argument(
         "--save-screenshots",
         action="store_true",
         default=os.getenv("ICLASS_SAVE_SCREENSHOTS", "0").lower()
@@ -2649,9 +2682,16 @@ def main():
                     )
                     driver.take_screenshot(f"error_class_{i}.png")
 
+            effective_complete_transaction = (
+                args.complete_transaction and not args.dry_run
+            )
+            if args.dry_run and args.complete_transaction:
+                logger.info(
+                    "Dry-run flag enabled; overriding complete-transaction setting."
+                )
             driver.process_cart(
                 promo_code=args.promo_code,
-                complete_transaction=args.complete_transaction,
+                complete_transaction=effective_complete_transaction,
             )
             logger.info("All operations completed.")
 
@@ -2675,7 +2715,9 @@ def main():
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "base_url": args.base_url,
                 "schedule_path": getattr(args, "schedule", None),
-                "complete_transaction": args.complete_transaction,
+                "complete_transaction": (
+                    args.complete_transaction and not args.dry_run
+                ),
                 "summary": counts,
                 "results": summary_data,
                 "critical_error": str(main_exception) if main_exception else None,

@@ -254,6 +254,8 @@ async def websocket_scrape(websocket: WebSocket):
         child_env = os.environ.copy()
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+        # Ensure runtime honors current UI toggle values, not stale env defaults.
+        child_env["ICLASS_COMPLETE_TRANSACTION"] = "0"
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -364,6 +366,9 @@ async def websocket_enroll_selected(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
+        child_env["ICLASS_COMPLETE_TRANSACTION"] = (
+            "1" if complete_transaction else "0"
+        )
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
 
@@ -492,6 +497,9 @@ async def websocket_endpoint(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
+        child_env["ICLASS_COMPLETE_TRANSACTION"] = (
+            "1" if complete_transaction else "0"
+        )
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
 
