@@ -90,18 +90,25 @@
             display: flex;
             gap: 0;
         }
-        .layout-controls {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            margin-bottom: 0.5rem;
-            gap: 0.5rem;
-        }
-        .layout-controls button {
-            width: auto;
+        .sidebar-edge-toggle {
+            position: fixed;
+            top: 50%;
+            left: calc(var(--sidebar-width) + 2px);
+            transform: translateY(-50%);
+            z-index: 1200;
+            width: 1.45rem;
+            height: 2.8rem;
             margin: 0;
-            padding: 0.35rem 0.65rem;
-            font-size: 0.82rem;
+            padding: 0;
+            border-radius: 0 6px 6px 0;
+            border-left: 0;
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.9;
+        }
+        .sidebar-edge-toggle:hover { opacity: 1; }
+        @media (max-width: 900px) {
+            .sidebar-edge-toggle { display: none; }
         }
         .tab-btn {
             background: none;
@@ -299,6 +306,14 @@
     </style>
 </head>
 <body>
+    <button
+        id="toggle-sidebar-edge"
+        class="secondary outline sidebar-edge-toggle"
+        type="button"
+        onclick="toggleSidebar()"
+        aria-expanded="true"
+        title="Toggle configuration sidebar"
+    >❮</button>
     <div class="app-shell">
         <!-- ===== Sidebar: Configuration + Saved Schedules ===== -->
         <aside class="sidebar">
@@ -366,15 +381,6 @@
             <header class="page-header">
                 <h1>Enrollment Dashboard</h1>
                 <p class="subtitle">Automate your iClassPro signups</p>
-                <div class="layout-controls">
-                    <button
-                        id="toggle-sidebar-button"
-                        class="secondary outline"
-                        type="button"
-                        onclick="toggleSidebar()"
-                        aria-expanded="true"
-                    >Hide Sidebar</button>
-                </div>
                 <nav class="tab-nav">
                     <button id="tab-btn-manual" class="tab-btn active" onclick="switchTab('manual', this)">Manual Enrollment</button>
                     <button id="tab-btn-discover" class="tab-btn" onclick="switchTab('discover', this)">Discover &amp; Enroll</button>
@@ -657,11 +663,13 @@
 
         function applySidebarCollapsedState(collapsed) {
             const appShell = document.querySelector('.app-shell');
-            const toggleBtn = document.getElementById('toggle-sidebar-button');
-            if (!appShell || !toggleBtn) return;
+            const edgeBtn = document.getElementById('toggle-sidebar-edge');
+            if (!appShell || !edgeBtn) return;
             appShell.classList.toggle('sidebar-collapsed', !!collapsed);
-            toggleBtn.innerText = collapsed ? 'Show Sidebar' : 'Hide Sidebar';
-            toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            edgeBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            edgeBtn.innerText = collapsed ? '❯' : '❮';
+            edgeBtn.title = collapsed ? 'Show sidebar' : 'Hide sidebar';
+            edgeBtn.style.left = collapsed ? '0' : 'calc(var(--sidebar-width) + 2px)';
             localStorage.setItem(uiStorageKeys.sidebarCollapsed, collapsed ? '1' : '0');
         }
 
