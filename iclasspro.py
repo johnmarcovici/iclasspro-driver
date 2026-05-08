@@ -9,6 +9,7 @@ import re
 import smtplib
 import time
 from datetime import datetime, timezone
+from typing import Optional
 import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
@@ -551,7 +552,7 @@ class IClassPro:
                     continue
                 raise
 
-    def _wait_for_class_detail_ready(self, timeout: int | None = None) -> None:
+    def _wait_for_class_detail_ready(self, timeout: Optional[int] = None) -> None:
         """Wait until the class-details view is rendered and actionable.
 
         Prefers UI-state readiness signals (Enroll Now button or detail labels)
