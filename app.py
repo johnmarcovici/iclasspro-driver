@@ -89,7 +89,9 @@ async def get(request: Request):
         "password": _get_config_value("ICLASS_PASSWORD", ""),
         "student_id": _get_config_value("ICLASS_STUDENT_ID", ""),
         "promo_code": _get_config_value("ICLASS_PROMO_CODE", ""),
-        "complete_transaction": _get_config_value("ICLASS_COMPLETE_TRANSACTION", "1").lower()
+        "complete_transaction": _get_config_value(
+            "ICLASS_COMPLETE_TRANSACTION", "1"
+        ).lower()
         in ("1", "true", "yes"),
         "send_email": _get_config_value("ICLASS_SEND_EMAIL", "0").lower()
         in ("1", "true", "yes"),
@@ -366,9 +368,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
-        child_env["ICLASS_COMPLETE_TRANSACTION"] = (
-            "1" if complete_transaction else "0"
-        )
+        child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
 
@@ -497,9 +497,7 @@ async def websocket_endpoint(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
-        child_env["ICLASS_COMPLETE_TRANSACTION"] = (
-            "1" if complete_transaction else "0"
-        )
+        child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
 

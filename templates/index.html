@@ -51,19 +51,8 @@
         .splitter.splitter-col { cursor: col-resize; }
         .splitter.splitter-row { cursor: row-resize; }
 
-        .sidebar h2 {
-            margin: 0 0 0.25rem 0;
-            font-size: 1.1rem;
-        }
-        .sidebar h2 small {
-            display: block;
-            font-weight: normal;
-            color: var(--muted-color);
-            font-size: 0.8rem;
-            margin-top: 0.1rem;
-        }
-
         .sidebar details { margin-top: 1rem; }
+        .sidebar details:first-of-type { margin-top: 0; }
         .sidebar details summary { font-weight: 600; cursor: pointer; }
 
         .sidebar .grid { display: block; }
@@ -79,12 +68,19 @@
         }
 
         .page-header {
-            padding: 0.75rem 1.5rem 0;
+            padding: 0.5rem 1.5rem 0;
             border-bottom: 1px solid var(--muted-border-color);
             background: var(--background-color);
         }
-        .page-header h1 { margin: 0 0 0.25rem 0; font-size: 1.3rem; }
-        .page-header .subtitle { color: var(--muted-color); font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .page-header .title-row {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            margin-bottom: 0.35rem;
+            flex-wrap: wrap;
+        }
+        .page-header h1 { margin: 0; font-size: 1.3rem; }
+        .page-header .subtitle { color: var(--muted-color); font-size: 0.9rem; margin: 0; }
 
         .tab-nav {
             display: flex;
@@ -107,8 +103,32 @@
             opacity: 0.9;
         }
         .sidebar-edge-toggle:hover { opacity: 1; }
+        .run-panel-edge-toggle {
+            position: fixed;
+            left: 50%;
+            bottom: var(--run-panel-height);
+            transform: translateX(-50%);
+            z-index: 1200;
+            width: 2.8rem;
+            height: 1.45rem;
+            margin: 0;
+            padding: 0;
+            border-radius: 6px 6px 0 0;
+            border-bottom: 0;
+            font-size: 1rem;
+            line-height: 1;
+            opacity: 0.9;
+        }
+        .run-panel-edge-toggle:hover { opacity: 1; }
+        .main.run-panel-collapsed .run-panel {
+            display: none;
+        }
+        .main.run-panel-collapsed #log-splitter {
+            display: none;
+        }
         @media (max-width: 900px) {
             .sidebar-edge-toggle { display: none; }
+            .run-panel-edge-toggle { display: none; }
         }
         .tab-btn {
             background: none;
@@ -314,13 +334,17 @@
         aria-expanded="true"
         title="Toggle configuration sidebar"
     >❮</button>
+    <button
+        id="toggle-run-panel-edge"
+        class="secondary outline run-panel-edge-toggle"
+        type="button"
+        onclick="toggleRunPanel()"
+        aria-expanded="true"
+        title="Toggle run output panel"
+    >▾</button>
     <div class="app-shell">
         <!-- ===== Sidebar: Configuration + Saved Schedules ===== -->
         <aside class="sidebar">
-            <h2>iClassPro
-                <small>Enrollment Dashboard</small>
-            </h2>
-
             <details open>
                 <summary>Configuration</summary>
                 <div class="grid" style="margin-top: 0.5rem;">
@@ -379,8 +403,10 @@
         <!-- ===== Main pane ===== -->
         <main class="main">
             <header class="page-header">
-                <h1>Enrollment Dashboard</h1>
-                <p class="subtitle">Automate your iClassPro signups</p>
+                <div class="title-row">
+                    <h1>Enrollment Dashboard</h1>
+                    <p class="subtitle">Automate your iClassPro signups</p>
+                </div>
                 <nav class="tab-nav">
                     <button id="tab-btn-manual" class="tab-btn active" onclick="switchTab('manual', this)">Manual Enrollment</button>
                     <button id="tab-btn-discover" class="tab-btn" onclick="switchTab('discover', this)">Discover &amp; Enroll</button>
@@ -557,7 +583,8 @@
         const uiStorageKeys = {
             sidebarWidth: 'iclasspro.sidebarWidth',
             runPanelHeight: 'iclasspro.runPanelHeight',
-            sidebarCollapsed: 'iclasspro.sidebarCollapsed'
+            sidebarCollapsed: 'iclasspro.sidebarCollapsed',
+            runPanelCollapsed: 'iclasspro.runPanelCollapsed'
         };
 
         function isWorkflowRunning() {
@@ -573,6 +600,9 @@
             initResizableLayout();
             applySidebarCollapsedState(
                 localStorage.getItem(uiStorageKeys.sidebarCollapsed) === '1'
+            );
+            applyRunPanelCollapsedState(
+                localStorage.getItem(uiStorageKeys.runPanelCollapsed) === '1'
             );
             renderSidebarSchedulesList();
             setupConfigAutosave();
@@ -677,6 +707,24 @@
             const appShell = document.querySelector('.app-shell');
             const collapsed = appShell && appShell.classList.contains('sidebar-collapsed');
             applySidebarCollapsedState(!collapsed);
+        }
+
+        function applyRunPanelCollapsedState(collapsed) {
+            const main = document.querySelector('.main');
+            const edgeBtn = document.getElementById('toggle-run-panel-edge');
+            if (!main || !edgeBtn) return;
+            main.classList.toggle('run-panel-collapsed', !!collapsed);
+            edgeBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            edgeBtn.innerText = collapsed ? '▴' : '▾';
+            edgeBtn.title = collapsed ? 'Show run output panel' : 'Hide run output panel';
+            edgeBtn.style.bottom = collapsed ? '0' : 'var(--run-panel-height)';
+            localStorage.setItem(uiStorageKeys.runPanelCollapsed, collapsed ? '1' : '0');
+        }
+
+        function toggleRunPanel() {
+            const main = document.querySelector('.main');
+            const collapsed = main && main.classList.contains('run-panel-collapsed');
+            applyRunPanelCollapsedState(!collapsed);
         }
 
         function togglePassword() {
