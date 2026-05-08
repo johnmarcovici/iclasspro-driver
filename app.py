@@ -5,7 +5,7 @@ import sys
 from typing import List, Dict
 
 import yaml
-from dotenv import load_dotenv, set_key, find_dotenv
+from dotenv import load_dotenv, set_key, dotenv_values
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,8 +33,11 @@ class SaveConfigRequest(BaseModel):
     deep_debug: bool
 
 
-# Load environment variables
-load_dotenv(override=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOTENV_PATH = os.path.join(BASE_DIR, ".env")
+
+# Load environment variables once at startup for subprocesses and defaults.
+load_dotenv(DOTENV_PATH, override=True)
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
 
@@ -69,19 +72,28 @@ def _load_locations() -> list:
         return yaml.safe_load(f).get("locations", [])
 
 
+def _get_config_value(key: str, default: str = "") -> str:
+    """Read config from .env on each request, fallback to process env."""
+    file_values = dotenv_values(DOTENV_PATH) if os.path.exists(DOTENV_PATH) else {}
+    value = file_values.get(key)
+    if value is None:
+        value = os.getenv(key, default)
+    return str(value) if value is not None else default
+
+
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     context = {
         "request": request,
-        "email": os.getenv("ICLASS_EMAIL", ""),
-        "password": os.getenv("ICLASS_PASSWORD", ""),
-        "student_id": os.getenv("ICLASS_STUDENT_ID", ""),
-        "promo_code": os.getenv("ICLASS_PROMO_CODE", ""),
-        "complete_transaction": os.getenv("ICLASS_COMPLETE_TRANSACTION", "1").lower()
+        "email": _get_config_value("ICLASS_EMAIL", ""),
+        "password": _get_config_value("ICLASS_PASSWORD", ""),
+        "student_id": _get_config_value("ICLASS_STUDENT_ID", ""),
+        "promo_code": _get_config_value("ICLASS_PROMO_CODE", ""),
+        "complete_transaction": _get_config_value("ICLASS_COMPLETE_TRANSACTION", "1").lower()
         in ("1", "true", "yes"),
-        "send_email": os.getenv("ICLASS_SEND_EMAIL", "0").lower()
+        "send_email": _get_config_value("ICLASS_SEND_EMAIL", "0").lower()
         in ("1", "true", "yes"),
-        "deep_debug": os.getenv("ICLASS_DEEP_DEBUG", "0").lower()
+        "deep_debug": _get_config_value("ICLASS_DEEP_DEBUG", "0").lower()
         in ("1", "true", "yes"),
         "initial_schedule": [],
         "default_schedule_filename": None,
@@ -89,7 +101,7 @@ async def get(request: Request):
     }
 
     # Try to load the default schedule from .env to pre-populate the grid
-    default_schedule_env = os.getenv("ICLASS_SCHEDULE")
+    default_schedule_env = _get_config_value("ICLASS_SCHEDULE", "")
     if default_schedule_env:
         default_schedule_path = os.path.normpath(default_schedule_env)
         if os.path.exists(default_schedule_path):
@@ -116,39 +128,45 @@ async def get(request: Request):
 
 @app.post("/api/update-default-schedule")
 async def update_default_schedule(request: UpdateEnvRequest):
-    dotenv_path = find_dotenv()
-    if not dotenv_path:
-        with open(".env", "w") as f:
+    if not os.path.exists(DOTENV_PATH):
+        with open(DOTENV_PATH, "w") as f:
             pass
-        dotenv_path = find_dotenv()
 
     schedule_path = os.path.join("schedules", request.filename)
     if not os.path.exists(schedule_path):
         raise HTTPException(status_code=404, detail="Schedule file not found")
 
-    set_key(dotenv_path, "ICLASS_SCHEDULE", schedule_path)
+    set_key(DOTENV_PATH, "ICLASS_SCHEDULE", schedule_path)
+    os.environ["ICLASS_SCHEDULE"] = schedule_path
     return {"message": f"Default schedule updated to {request.filename}"}
 
 
 @app.post("/api/save-config")
 async def save_config(request: SaveConfigRequest):
-    dotenv_path = find_dotenv()
-    if not dotenv_path:
-        with open(".env", "w") as f:
+    if not os.path.exists(DOTENV_PATH):
+        with open(DOTENV_PATH, "w") as f:
             pass
-        dotenv_path = find_dotenv()
 
-    set_key(dotenv_path, "ICLASS_EMAIL", request.email)
-    set_key(dotenv_path, "ICLASS_PASSWORD", request.password)
-    set_key(dotenv_path, "ICLASS_STUDENT_ID", request.student_id)
-    set_key(dotenv_path, "ICLASS_PROMO_CODE", request.promo_code)
+    set_key(DOTENV_PATH, "ICLASS_EMAIL", request.email)
+    set_key(DOTENV_PATH, "ICLASS_PASSWORD", request.password)
+    set_key(DOTENV_PATH, "ICLASS_STUDENT_ID", request.student_id)
+    set_key(DOTENV_PATH, "ICLASS_PROMO_CODE", request.promo_code)
     set_key(
-        dotenv_path,
+        DOTENV_PATH,
         "ICLASS_COMPLETE_TRANSACTION",
         "1" if request.complete_transaction else "0",
     )
-    set_key(dotenv_path, "ICLASS_SEND_EMAIL", "1" if request.send_email else "0")
-    set_key(dotenv_path, "ICLASS_DEEP_DEBUG", "1" if request.deep_debug else "0")
+    set_key(DOTENV_PATH, "ICLASS_SEND_EMAIL", "1" if request.send_email else "0")
+    set_key(DOTENV_PATH, "ICLASS_DEEP_DEBUG", "1" if request.deep_debug else "0")
+    os.environ["ICLASS_EMAIL"] = request.email
+    os.environ["ICLASS_PASSWORD"] = request.password
+    os.environ["ICLASS_STUDENT_ID"] = request.student_id
+    os.environ["ICLASS_PROMO_CODE"] = request.promo_code
+    os.environ["ICLASS_COMPLETE_TRANSACTION"] = (
+        "1" if request.complete_transaction else "0"
+    )
+    os.environ["ICLASS_SEND_EMAIL"] = "1" if request.send_email else "0"
+    os.environ["ICLASS_DEEP_DEBUG"] = "1" if request.deep_debug else "0"
     return {"message": "Configuration saved"}
 
 

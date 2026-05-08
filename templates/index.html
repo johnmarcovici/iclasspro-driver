@@ -9,6 +9,7 @@
         :root {
             --sidebar-width: 320px;
             --run-panel-height: 280px;
+            --splitter-size: 8px;
         }
 
         html, body {
@@ -31,6 +32,18 @@
             overflow-y: auto;
             background: var(--card-background-color, #fff);
         }
+
+        .splitter {
+            flex: 0 0 var(--splitter-size);
+            background: var(--muted-border-color);
+            opacity: 0.7;
+            transition: opacity 0.15s ease;
+            user-select: none;
+            touch-action: none;
+        }
+        .splitter:hover { opacity: 1; }
+        .splitter.splitter-col { cursor: col-resize; }
+        .splitter.splitter-row { cursor: row-resize; }
 
         .sidebar h2 {
             margin: 0 0 0.25rem 0;
@@ -106,6 +119,8 @@
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            height: var(--run-panel-height);
+            min-height: 140px;
         }
         .run-panel-bar {
             display: flex;
@@ -259,6 +274,8 @@
             .sidebar { width: 100%; min-width: 0; max-height: 60vh; border-right: none; border-bottom: 1px solid var(--muted-border-color); }
             .main { height: auto; }
             .tab-content { overflow-y: visible; }
+            .splitter { display: none; }
+            .run-panel { height: auto; min-height: 0; }
         }
     </style>
 </head>
@@ -323,6 +340,7 @@
                 </small>
             </details>
         </aside>
+        <div id="sidebar-splitter" class="splitter splitter-col" role="separator" aria-label="Resize sidebar" aria-orientation="vertical"></div>
 
         <!-- ===== Main pane ===== -->
         <main class="main">
@@ -457,6 +475,7 @@
                     </section>
                 </div>
             </section>
+            <div id="log-splitter" class="splitter splitter-row" role="separator" aria-label="Resize run output panel" aria-orientation="horizontal"></div>
 
             <!-- ===== Shared Run Panel ===== -->
             <section class="run-panel">
@@ -500,6 +519,11 @@
         let activeWs = null;
         let activeKind = null;
         let isStopped = false;
+        let configSaveDebounceTimer = null;
+        const uiStorageKeys = {
+            sidebarWidth: 'iclasspro.sidebarWidth',
+            runPanelHeight: 'iclasspro.runPanelHeight'
+        };
 
         function isWorkflowRunning() {
             if (!activeWs) return false;
@@ -511,7 +535,9 @@
 
         // ----- Init -----
         window.onload = function() {
+            initResizableLayout();
             renderSidebarSchedulesList();
+            setupConfigAutosave();
 
             if (initialSchedule && initialSchedule.length > 0) {
                 initialSchedule.forEach(cls => {
@@ -521,6 +547,81 @@
                 addScheduleRow();
             }
         };
+
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        function initResizableLayout() {
+            if (window.innerWidth <= 900) return;
+
+            const root = document.documentElement;
+            const sidebar = document.querySelector('.sidebar');
+            const appShell = document.querySelector('.app-shell');
+            const main = document.querySelector('.main');
+            const sidebarSplitter = document.getElementById('sidebar-splitter');
+            const runPanel = document.querySelector('.run-panel');
+            const logSplitter = document.getElementById('log-splitter');
+
+            const savedSidebarWidth = parseInt(localStorage.getItem(uiStorageKeys.sidebarWidth), 10);
+            if (Number.isFinite(savedSidebarWidth)) {
+                const maxSidebar = Math.max(260, Math.floor(window.innerWidth * 0.55));
+                const width = clamp(savedSidebarWidth, 220, maxSidebar);
+                root.style.setProperty('--sidebar-width', `${width}px`);
+            }
+
+            const savedRunPanelHeight = parseInt(localStorage.getItem(uiStorageKeys.runPanelHeight), 10);
+            if (Number.isFinite(savedRunPanelHeight)) {
+                const maxRunPanel = Math.max(220, Math.floor(window.innerHeight * 0.65));
+                const height = clamp(savedRunPanelHeight, 140, maxRunPanel);
+                root.style.setProperty('--run-panel-height', `${height}px`);
+            }
+
+            let draggingSidebar = false;
+            let draggingRunPanel = false;
+
+            sidebarSplitter.addEventListener('pointerdown', function(event) {
+                draggingSidebar = true;
+                sidebarSplitter.setPointerCapture(event.pointerId);
+                document.body.style.cursor = 'col-resize';
+                event.preventDefault();
+            });
+
+            logSplitter.addEventListener('pointerdown', function(event) {
+                draggingRunPanel = true;
+                logSplitter.setPointerCapture(event.pointerId);
+                document.body.style.cursor = 'row-resize';
+                event.preventDefault();
+            });
+
+            window.addEventListener('pointermove', function(event) {
+                if (draggingSidebar) {
+                    const shellRect = appShell.getBoundingClientRect();
+                    const maxSidebar = Math.max(260, Math.floor(shellRect.width * 0.55));
+                    const nextWidth = clamp(event.clientX - shellRect.left, 220, maxSidebar);
+                    root.style.setProperty('--sidebar-width', `${nextWidth}px`);
+                    localStorage.setItem(uiStorageKeys.sidebarWidth, String(nextWidth));
+                }
+
+                if (draggingRunPanel) {
+                    const mainRect = main.getBoundingClientRect();
+                    const splitterHeight = logSplitter.getBoundingClientRect().height || 8;
+                    const pointerFromTop = event.clientY - mainRect.top;
+                    const nextHeight = mainRect.height - pointerFromTop - splitterHeight;
+                    const clampedHeight = clamp(nextHeight, 140, Math.floor(mainRect.height * 0.7));
+                    root.style.setProperty('--run-panel-height', `${clampedHeight}px`);
+                    localStorage.setItem(uiStorageKeys.runPanelHeight, String(clampedHeight));
+                }
+            });
+
+            window.addEventListener('pointerup', function() {
+                if (draggingSidebar || draggingRunPanel) {
+                    draggingSidebar = false;
+                    draggingRunPanel = false;
+                    document.body.style.cursor = '';
+                }
+            });
+        }
 
         function togglePassword() {
             const passwordInput = document.getElementById("password");
@@ -821,7 +922,7 @@
         }
 
         function saveConfigToEnv() {
-            fetch('/api/save-config', {
+            return fetch('/api/save-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -834,6 +935,46 @@
                     deep_debug: document.getElementById('deep_debug').checked
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
+        }
+
+        function queueConfigSave(delayMs = 350) {
+            if (configSaveDebounceTimer) {
+                clearTimeout(configSaveDebounceTimer);
+            }
+            configSaveDebounceTimer = setTimeout(() => {
+                saveConfigToEnv();
+                configSaveDebounceTimer = null;
+            }, delayMs);
+        }
+
+        function setupConfigAutosave() {
+            const textInputs = ['email', 'password', 'student_id', 'promo_code']
+                .map(id => document.getElementById(id))
+                .filter(Boolean);
+            const checkboxInputs = ['complete_transaction', 'send_email', 'deep_debug']
+                .map(id => document.getElementById(id))
+                .filter(Boolean);
+
+            textInputs.forEach(input => {
+                input.addEventListener('keydown', function(event) {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        saveConfigToEnv();
+                    }
+                });
+                input.addEventListener('blur', function() {
+                    queueConfigSave(0);
+                });
+                input.addEventListener('input', function() {
+                    queueConfigSave();
+                });
+            });
+
+            checkboxInputs.forEach(input => {
+                input.addEventListener('change', function() {
+                    saveConfigToEnv();
+                });
+            });
         }
 
         // ===== Manual: run schedule =====
