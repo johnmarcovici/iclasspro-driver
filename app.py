@@ -39,6 +39,19 @@ DOTENV_PATH = os.path.join(BASE_DIR, ".env")
 # Load environment variables once at startup for subprocesses and defaults.
 load_dotenv(DOTENV_PATH, override=True)
 
+
+def _get_driver_script() -> str:
+    """Return the enrollment driver script filename.
+
+    Defaults to iclasspro.py (Playwright browser driver).
+    Set ICLASS_DRIVER=api in .env to use iclasspro_api.py instead
+    (pure requests-based, no browser required).
+    """
+    driver = _get_config_value("ICLASS_DRIVER", "playwright").strip().lower()
+    if driver == "api":
+        return "iclasspro_api.py"
+    return "iclasspro.py"
+
 app = FastAPI(title="iClassPro Enrollment Dashboard")
 
 # Ensure templates directory exists
@@ -235,7 +248,7 @@ async def websocket_scrape(websocket: WebSocket):
         await websocket.send_text("Starting class discovery scrape...")
 
         cmd_args = [
-            "iclasspro.py",
+            _get_driver_script(),
             "--email",
             email,
             "--password",
@@ -346,7 +359,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
         await websocket.send_text("Starting enrollment of selected classes...")
 
         cmd_args = [
-            "iclasspro.py",
+            _get_driver_script(),
             "--email",
             email,
             "--password",
@@ -475,7 +488,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Build the command arguments
         cmd_args = [
-            "iclasspro.py",
+            _get_driver_script(),
             "--email",
             email,
             "--password",
