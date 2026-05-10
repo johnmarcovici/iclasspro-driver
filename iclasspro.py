@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
 import argparse
 import json
@@ -6,15 +7,18 @@ import logging
 import os
 import random
 import re
+import sys
 import smtplib
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 import yaml
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse, urljoin, quote, unquote, parse_qs
+
+import requests
 
 from dotenv import load_dotenv
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -88,6 +92,7 @@ WEEK_DAYS = [
     "Saturday",
 ]
 DAY_TO_QUERY_INDEX = {name.lower(): idx for idx, name in enumerate(WEEK_DAYS, start=1)}
+DAY_TO_INDEX = DAY_TO_QUERY_INDEX  # HTTP enrollment helpers
 logger = logging.getLogger(__name__)
 
 
@@ -2428,9 +2433,635 @@ class IClassPro:
         self._is_shutting_down = False
 
 
+# =============================================================================
+# HTTP / REST driver (Open API discovery + JWT cart/checkout)
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+API_BASE = "https://app.iclasspro.com/api/jwt/v1"
+LOGIN_URL = f"{API_BASE}/login"
+# Public read-only API (no login). Same data the portal SPA uses for class lists.
+OPEN_API_BASE = "https://app.iclasspro.com/api/open/v1"
+
+_PLAIN_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})(am|pm)", re.IGNORECASE)
+_OPEN_PLAIN_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})\s*([AP]M)$", re.IGNORECASE)
+
+
+def _default_portal_slug() -> str:
+    """Org slug for JWT `account` (same as the first path segment of the portal URL)."""
+    env_portal = (os.getenv("ICLASS_PORTAL") or "").strip()
+    if env_portal:
+        return env_portal
+    base = (os.getenv("ICLASS_BASE_URL") or "").strip()
+    if base:
+        try:
+            path = urlparse(base).path.strip("/")
+            if path:
+                return path.split("/")[0]
+        except Exception:
+            pass
+    return "scaq"
+
+
+# ---------------------------------------------------------------------------
+# Time utilities (HTTP enrollment matching)
+# ---------------------------------------------------------------------------
+def _http_normalize_schedule_time(raw: str) -> str:
+    """Normalise a time string to canonical 'H:MMam' form."""
+    raw = raw.strip().lower().replace(" ", "")
+    m = _PLAIN_TIME_RE.match(raw)
+    if m:
+        h, mn, period = int(m.group(1)), m.group(2), m.group(3).lower()
+        return f"{h}:{mn}{period}"
+    if ":" in raw and len(raw) == 5:
+        h_str, mn = raw.split(":")
+        h = int(h_str)
+        period = "am" if h < 12 else "pm"
+        if h == 0:
+            h = 12
+        elif h > 12:
+            h -= 12
+        return f"{h}:{mn}{period}"
+    return raw
+
+
+def _http_times_match(schedule_time: str, class_time: str) -> bool:
+    return _http_normalize_schedule_time(
+        schedule_time
+    ) == _http_normalize_schedule_time(class_time)
+
+
+def _normalize_open_time(raw: str) -> str:
+    """Convert Open API times like '10:30AM' to schedule-friendly '10:30am'."""
+    raw = (raw or "").strip()
+    m = _OPEN_PLAIN_TIME_RE.match(raw.replace(" ", ""))
+    if m:
+        h, mn, ap = int(m.group(1)), m.group(2), m.group(3).lower()
+        return f"{h}:{mn}{ap}"
+    return _http_normalize_schedule_time(raw)
+
+
+# ---------------------------------------------------------------------------
+# Open API (no authentication — used for class discovery / scrape)
+# ---------------------------------------------------------------------------
+def _open_api_fetch_classes_all(org_slug: str) -> list:
+    """Paginate GET ``/api/open/v1/{slug}/classes``."""
+    slug = org_slug.strip().strip("/")
+    url = f"{OPEN_API_BASE}/{slug}/classes"
+    out: list = []
+    page = 1
+    limit = 80
+    while True:
+        resp = requests.get(url, params={"limit": limit, "page": page}, timeout=45)
+        resp.raise_for_status()
+        body = resp.json()
+        rows = body.get("data") or []
+        out.extend(rows)
+        total = int(body.get("totalRecords") or 0)
+        if not rows or page * limit >= total:
+            break
+        page += 1
+    return out
+
+
+def _open_row_to_discovery(row: dict, portal_slug: str, student_id: int) -> dict:
+    """Map one Open API class row to the shape emitted by iclasspro.py scrape + UI."""
+    name = (row.get("name") or "").strip()
+    sched_list = row.get("schedule") or []
+    sched = sched_list[0] if sched_list else {}
+    day_num = int(sched.get("dayNumber") or 0)
+    day_name = WEEK_DAYS[day_num - 1] if 1 <= day_num <= 7 else ""
+    time_str = _normalize_open_time(str(sched.get("startTime") or ""))
+
+    location = ""
+    colon = name.find(":")
+    if colon > 0:
+        location = name[:colon].strip()
+
+    instructors = row.get("instructors") or []
+    instructor = str(instructors[0]).strip() if instructors else ""
+
+    cid = row.get("id")
+    filters_json = json.dumps({"students": str(student_id), "days": str(day_num)})
+    base = f"https://portal.iclasspro.com/{portal_slug.strip('/').strip()}/"
+    class_url = ""
+    if cid is not None:
+        class_url = (
+            f"{base.rstrip('/')}/class-details/{cid}"
+            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
+        )
+
+    return {
+        "name": name,
+        "Location": location,
+        "Day": day_name,
+        "Time": time_str,
+        "url": class_url,
+        "Instructor": instructor,
+    }
+
+
+def scrape_classes_open(
+    portal_slug: str,
+    student_id: int,
+    days: Optional[list] = None,
+    locations: Optional[list] = None,
+) -> list:
+    """Discover classes via the public Open API (no JWT login required)."""
+    days_norm = [d.strip().lower() for d in (days or []) if d.strip()]
+    locs_norm = [l.strip().lower() for l in (locations or []) if l.strip()]
+
+    logger.info("Fetching class catalog from Open API (org=%s)...", portal_slug)
+    rows = _open_api_fetch_classes_all(portal_slug)
+    seen: set[Any] = set()
+    results = []
+
+    for row in rows:
+        cid = row.get("id")
+        if not (row.get("schedule") or []):
+            logger.debug("Skipping class id=%s (no schedule)", cid)
+            continue
+        entry = _open_row_to_discovery(row, portal_slug, student_id)
+
+        if days_norm and entry["Day"].lower() not in days_norm:
+            continue
+        if locs_norm:
+            loc_l = entry["Location"].lower()
+            if not any(lf in loc_l for lf in locs_norm):
+                continue
+
+        if cid in seen:
+            continue
+        seen.add(cid)
+        results.append(entry)
+        print(
+            f"  [{entry['Day']}] {entry['Location']} at {entry['Time']}"
+            f"  (id={cid}, instructor={entry['Instructor']})"
+        )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# API client
+# ---------------------------------------------------------------------------
+class IClassProAPIClient:
+    """Thin wrapper around the iClassPro JWT REST API."""
+
+    def __init__(self, email: str, password: str, portal: Optional[str] = None) -> None:
+        self.email = email
+        self.password = password
+        self.portal = portal if portal else _default_portal_slug()
+        self.token: Optional[str] = None
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "Accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Origin": "https://portal.iclasspro.com",
+                "Referer": f"https://portal.iclasspro.com/{self.portal}/",
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # Auth
+    # ------------------------------------------------------------------
+    def login(self) -> str:
+        """Authenticate and store the JWT token."""
+        logger.info("Logging in as %s (account=%s)...", self.email, self.portal)
+        # JWT `/login` expects `account` (organization slug), not `portal`.
+        payload = {
+            "email": self.email,
+            "password": self.password,
+            "account": self.portal,
+        }
+        resp = self.session.post(LOGIN_URL, json=payload, timeout=30)
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                msg = body.get("message") or body.get("error") or resp.text
+            except ValueError:
+                msg = resp.text or resp.reason
+            raise RuntimeError(f"Login failed ({resp.status_code}): {msg}") from None
+        data = resp.json()
+        # Token may be top-level or nested under "data"
+        self.token = (
+            data.get("token")
+            or data.get("access_token")
+            or data.get("jwt")
+            or (data.get("data") or {}).get("token")
+        )
+        if not self.token:
+            raise RuntimeError(f"Login response contained no token: {data}")
+        logger.info("Login successful.")
+        return self.token
+
+    def _get(self, path: str, params: Optional[dict] = None, **kwargs) -> Any:
+        """Authenticated GET — appends token automatically."""
+        if not self.token:
+            self.login()
+        p = dict(params or {})
+        p["token"] = self.token
+        resp = self.session.get(f"{API_BASE}/{path}", params=p, timeout=30, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _post(
+        self, path: str, payload: dict, params: Optional[dict] = None, **kwargs
+    ) -> Any:
+        """Authenticated POST — appends token automatically."""
+        if not self.token:
+            self.login()
+        p = dict(params or {})
+        p["token"] = self.token
+        resp = self.session.post(
+            f"{API_BASE}/{path}", json=payload, params=p, timeout=30, **kwargs
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # Data retrieval
+    # ------------------------------------------------------------------
+    def get_students(self) -> list:
+        return self._get("students")
+
+    def get_sessions(self, student_ids: str = "") -> list:
+        return self._get("sessions", params={"students": student_ids})
+
+    def get_classes(
+        self,
+        *,
+        day_index: Optional[int] = None,
+        location_filter: Optional[str] = None,
+        student_id: Optional[int] = None,
+    ) -> list:
+        """Fetch classes with optional day/location/student filters."""
+        params: dict[str, Any] = {}
+        if day_index is not None:
+            params["dayOfWeek"] = day_index
+        if student_id is not None:
+            params["selectedStudentIds"] = student_id
+        classes = self._get("classes", params=params)
+        if location_filter:
+            lf = location_filter.lower()
+            classes = [
+                c
+                for c in classes
+                if lf in (c.get("location") or c.get("name") or "").lower()
+            ]
+        return classes
+
+    def get_class_detail(self, class_id: int, student_id: Optional[int] = None) -> dict:
+        """Return full detail for a single class including sessions."""
+        params: dict[str, Any] = {}
+        if student_id is not None:
+            params["selectedStudentIds"] = student_id
+        return self._get(f"classes/{class_id}", params=params)
+
+    def get_cart(self) -> list:
+        return self._get("cart")
+
+    def get_payment_methods(self) -> list:
+        return self._get("family-payment-method")
+
+    # ------------------------------------------------------------------
+    # Cart & checkout
+    # ------------------------------------------------------------------
+    def add_to_cart(self, class_id: int, session_id: int, student_id: int) -> dict:
+        """Add a class/session to the cart."""
+        payload = {
+            "objectId": class_id,
+            "objectType": "session",
+            "sessionId": session_id,
+            "selectedStudentIds": [student_id],
+        }
+        logger.info(
+            "Adding to cart: class=%d session=%d student=%d",
+            class_id,
+            session_id,
+            student_id,
+        )
+        return self._post("validate-cart-item", payload)
+
+    def apply_promo_code(self, code: str) -> dict:
+        """Apply a promo/discount code to the cart."""
+        logger.info("Applying promo code: %s", code)
+        return self._post("cart/promo-code", {"promoCode": code})
+
+    def checkout(
+        self,
+        payment_method_id: Optional[int] = None,
+        *,
+        complete_transaction: bool = True,
+    ) -> dict:
+        """Submit the cart for payment.
+
+        If complete_transaction is False this is a dry-run — logs intent but
+        does not submit (mirrors --complete-transaction semantics in iclasspro.py).
+        """
+        if not complete_transaction:
+            logger.info("Dry-run: skipping checkout (complete_transaction=False).")
+            return {
+                "dry_run": True,
+                "message": "Transaction not submitted (dry-run mode).",
+            }
+
+        payload: dict[str, Any] = {}
+        if payment_method_id is not None:
+            payload["paymentMethodId"] = payment_method_id
+
+        logger.info("Submitting checkout...")
+        return self._post("checkout", payload)
+
+
+# ---------------------------------------------------------------------------
+# High-level enrollment logic
+# ---------------------------------------------------------------------------
+def _find_matching_class(
+    classes: list,
+    location: str,
+    time_str: str,
+    day: str,
+) -> Optional[dict]:
+    """Return the first class matching location + time + day."""
+    day_idx = DAY_TO_INDEX.get(day.lower())
+    for cls in classes:
+        cls_loc = (cls.get("location") or cls.get("name") or "").lower()
+        cls_time = str(
+            cls.get("startTime") or cls.get("time") or cls.get("start_time") or ""
+        )
+        cls_day = cls.get("dayOfWeek") or cls.get("day_of_week") or 0
+        if isinstance(cls_day, str):
+            cls_day = DAY_TO_INDEX.get(cls_day.lower(), 0)
+
+        loc_ok = location.lower() in cls_loc
+        time_ok = _http_times_match(time_str, cls_time)
+        day_ok = (day_idx is None) or (cls_day == day_idx)
+
+        if loc_ok and time_ok and day_ok:
+            return cls
+    return None
+
+
+def enroll_from_schedule(
+    client: IClassProAPIClient,
+    schedule: list,
+    student_id: int,
+    promo_code: Optional[str] = None,
+    complete_transaction: bool = False,
+) -> tuple[list, Optional[dict]]:
+    """Add each schedule entry to the cart, then checkout once (matches iclasspro.py).
+
+    Returns ``(per_entry_summary, checkout_response)`` where ``checkout_response``
+    is None when nothing was added to the cart or checkout was not attempted.
+    """
+    summary: list = []
+    added_count = 0
+
+    for entry in schedule:
+        location = entry.get("Location", "")
+        time_str = entry.get("Time", "")
+        day = entry.get("Day", "")
+        label = f"{location} {day} {time_str}"
+
+        logger.info("── Processing: %s", label)
+        result: dict[str, Any] = {
+            "label": label,
+            "location": location,
+            "time": time_str,
+            "day": day,
+        }
+
+        try:
+            day_idx = DAY_TO_INDEX.get(day.lower())
+            if day_idx is None:
+                raise ValueError(f"Unknown day: {day!r}")
+
+            # 1. Fetch + filter classes
+            classes = client.get_classes(
+                day_index=day_idx,
+                location_filter=location,
+                student_id=student_id,
+            )
+            logger.info(
+                "  %d class(es) found for %s on %s", len(classes), location, day
+            )
+
+            # 2. Match by time
+            matched = _find_matching_class(classes, location, time_str, day)
+            if matched is None:
+                raise ValueError(f"No class found for {label}")
+
+            class_id = matched.get("id") or matched.get("classId")
+            logger.info(
+                "  Matched class id=%s: %s",
+                class_id,
+                matched.get("name") or matched.get("location"),
+            )
+
+            # 3. Get session id
+            detail = client.get_class_detail(class_id, student_id=student_id)
+            sessions = (
+                detail.get("sessions")
+                or (detail.get("data") or {}).get("sessions")
+                or []
+            )
+            if not sessions:
+                raw = client.get_sessions(student_ids=str(student_id))
+                sessions = [s for s in raw if str(s.get("classId")) == str(class_id)]
+            if not sessions:
+                raise ValueError(f"No sessions found for class {class_id}")
+
+            session = sessions[0]
+            session_id = session.get("id") or session.get("sessionId")
+            logger.info("  Session id=%s", session_id)
+
+            # 4. Guard: already enrolled?
+            if any(
+                str(s.get("status", "")).lower() in ("enrolled", "active")
+                for s in sessions
+                if str(s.get("studentId")) == str(student_id)
+            ):
+                raise EnrollmentSkipped(f"Already enrolled in {label}")
+
+            # 5. Add to cart (checkout happens once after all rows — same as browser driver)
+            client.add_to_cart(class_id, session_id, student_id)
+            added_count += 1
+
+            result["status"] = "Success"
+            result["details"] = "Added to cart"
+
+        except EnrollmentSkipped as exc:
+            logger.info("  Skipped: %s", exc.reason)
+            result["status"] = "Skipped"
+            result["details"] = exc.reason
+
+        except Exception as exc:
+            logger.error("  Failed to enroll in %s: %s", label, exc)
+            result["status"] = "Failed"
+            result["details"] = str(exc)
+
+        summary.append(result)
+
+    checkout_result: Optional[dict] = None
+    if added_count > 0:
+        if promo_code:
+            try:
+                client.apply_promo_code(promo_code)
+            except Exception as exc:
+                logger.warning("Promo code failed (continuing to checkout): %s", exc)
+
+        pms = client.get_payment_methods()
+        pm_id = pms[0].get("id") if pms else None
+        checkout_result = client.checkout(
+            pm_id, complete_transaction=complete_transaction
+        )
+        logger.info("Checkout: %s", str(checkout_result)[:200])
+
+    return summary, checkout_result
+
+
+def _setup_logging_http(level: int = logging.INFO) -> None:
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stdout,
+        force=True,
+    )
+
+
+def main_http(args: argparse.Namespace) -> int:
+    """Run --driver api: Open API scrape or JWT enrollment."""
+    _setup_logging_http(logging.DEBUG if args.deep_debug else logging.INFO)
+
+    if not args.student_id:
+        logger.error("--student-id required (or ICLASS_STUDENT_ID env var).")
+        return 1
+
+    portal_slug = args.portal or _default_portal_slug()
+
+    if args.scrape:
+        days = (
+            [d.strip() for d in args.scrape_days.split(",")]
+            if args.scrape_days
+            else None
+        )
+        locations = (
+            [l.strip() for l in args.scrape_locations.split(",")]
+            if args.scrape_locations
+            else None
+        )
+        print("\n=== Available Classes ===")
+        try:
+            found = scrape_classes_open(
+                portal_slug, args.student_id, days=days, locations=locations
+            )
+        except requests.HTTPError as exc:
+            logger.error("Open API request failed: %s", exc)
+            if exc.response is not None:
+                logger.error("Response: %s", exc.response.text[:500])
+            return 1
+        print(f"CLASSES_JSON:{json.dumps(found)}", flush=True)
+        print(f"\nFound {len(found)} class(es) matching filters.")
+        return 0
+
+    if not args.email or not args.password:
+        logger.error("--email and --password required for HTTP enrollment.")
+        return 1
+
+    client = IClassProAPIClient(args.email, args.password, portal=portal_slug)
+    try:
+        client.login()
+    except Exception as exc:
+        logger.error("Login failed: %s", exc)
+        logger.error(
+            "JWT login is only needed for HTTP enrollment/cart. "
+            "Class discovery uses the public Open API and does not require email/password."
+        )
+        return 1
+
+    if not args.schedule:
+        logger.error("--schedule required for enrollment mode.")
+        return 1
+
+    try:
+        with open(args.schedule) as fh:
+            schedule = json.load(fh)
+    except Exception as exc:
+        logger.error("Could not read schedule %r: %s", args.schedule, exc)
+        return 1
+
+    if not schedule:
+        logger.error("Schedule is empty.")
+        return 1
+
+    effective_complete = args.complete_transaction and not args.dry_run
+    if args.dry_run and args.complete_transaction:
+        logger.info("Dry-run flag enabled; overriding complete-transaction setting.")
+
+    logger.info(
+        "Starting enrollment for %d class(es) [complete_transaction=%s]",
+        len(schedule),
+        effective_complete,
+    )
+
+    summary, checkout_result = enroll_from_schedule(
+        client,
+        schedule,
+        args.student_id,
+        promo_code=args.promo_code or None,
+        complete_transaction=effective_complete,
+    )
+
+    print("\n=== Enrollment Run Report ===")
+    success = sum(1 for r in summary if r["status"] == "Success")
+    skipped = sum(1 for r in summary if r["status"] == "Skipped")
+    failed = sum(1 for r in summary if r["status"] == "Failed")
+
+    for r in summary:
+        icon = {"Success": "\u2714", "Skipped": "\u27f3", "Failed": "\u2718"}.get(
+            r["status"], "?"
+        )
+        print(f"  {icon} [{r['status']:8s}] {r['label']}")
+        if r.get("details") and r["status"] != "Success":
+            print(f"             {r['details']}")
+
+    if checkout_result is not None:
+        print("\n=== Checkout ===")
+        print(f"  {checkout_result}")
+
+    print(f"\nSummary: {success} added to cart, {skipped} skipped, {failed} failed.")
+    return 0 if failed == 0 else 1
+
+
+def _default_cli_driver() -> str:
+    v = (os.getenv("ICLASS_DRIVER") or "playwright").strip().lower()
+    return "api" if v == "api" else "playwright"
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description="iClassPro Enrollment Bot")
+    parser.add_argument(
+        "--driver",
+        type=str,
+        choices=["playwright", "api"],
+        default=_default_cli_driver(),
+        help=(
+            "playwright: browser automation (default). "
+            "api: HTTP — Open API discovery + JWT enrollment."
+        ),
+    )
+    parser.add_argument(
+        "--portal",
+        type=str,
+        default=os.getenv("ICLASS_PORTAL"),
+        help="Org slug for HTTP driver (JWT/Open API); optional if ICLASS_BASE_URL is set.",
+    )
     parser.add_argument(
         "--base-url",
         type=str,
@@ -2539,6 +3170,8 @@ def main():
         help="Path to persist Playwright session state across runs.",
     )
     args = parser.parse_args()
+    if args.driver == "api":
+        sys.exit(main_http(args))
 
     # --- Setup Logging ---
     log_file = "iclasspro.log"
