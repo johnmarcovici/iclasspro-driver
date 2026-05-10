@@ -387,6 +387,23 @@
                     <small style="color: var(--muted-color); font-size: 0.8rem;">
                         Use deep debugging only when troubleshooting failures; it writes extra DOM/screenshot/debug files.
                     </small>
+                    <label>
+                        Class discovery
+                        <select id="discovery_driver" style="width:100%; margin-top:0.25rem;">
+                            <option value="api" {% if discovery_driver == 'api' %}selected{% endif %}>HTTP API (fast, Open API catalog)</option>
+                            <option value="playwright" {% if discovery_driver == 'playwright' %}selected{% endif %}>Playwright (browser)</option>
+                        </select>
+                    </label>
+                    <label>
+                        Enrollment
+                        <select id="enrollment_driver" style="width:100%; margin-top:0.25rem;">
+                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — recommended)</option>
+                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT login — may fail for some accounts)</option>
+                        </select>
+                    </label>
+                    <small style="color: var(--muted-color); font-size: 0.8rem;">
+                        Choices are saved with your configuration. Enrollment defaults to the browser driver unless you pick HTTP API here or in <code>.env</code>.
+                    </small>
                 </div>
             </details>
 
@@ -473,8 +490,8 @@
 
                     <section style="margin-top: 1rem;">
                         <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
-                            <input type="checkbox" id="deep-scrape-cb" style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;">
-                            <span>Get detailed links &amp; instructor info <span style="font-weight:normal;font-size:0.85em;color:#888;">(slower)</span></span>
+                            <input type="checkbox" id="deep-scrape-cb" style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;" {% if discovery_driver == 'api' %}disabled{% endif %}>
+                            <span id="deep-scrape-label-primary">{% if discovery_driver == 'api' %}Detailed links &amp; instructor info {% else %}Get detailed links &amp; instructor info {% endif %}</span><span id="deep-scrape-label-hint" style="font-weight:normal;font-size:0.85em;color:#888;">{% if discovery_driver == 'api' %}(always included with HTTP discovery){% else %}(slower){% endif %}</span>
                         </label>
                         <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0; width: auto;">🔍 Discover Available Classes</button>
                     </section>
@@ -1025,6 +1042,25 @@
             }
         }
 
+        /** Keep deep-scrape checkbox in sync when discovery driver changes (API ignores --deep-scrape). */
+        function syncDeepScrapeUi() {
+            const sel = document.getElementById('discovery_driver');
+            const cb = document.getElementById('deep-scrape-cb');
+            const primary = document.getElementById('deep-scrape-label-primary');
+            const hint = document.getElementById('deep-scrape-label-hint');
+            if (!sel || !cb || !primary || !hint) return;
+            const api = sel.value === 'api';
+            cb.disabled = api;
+            if (api) {
+                cb.checked = false;
+                primary.textContent = 'Detailed links & instructor info ';
+                hint.textContent = '(always included with HTTP discovery)';
+            } else {
+                primary.textContent = 'Get detailed links & instructor info ';
+                hint.textContent = '(slower)';
+            }
+        }
+
         function saveConfigToEnv() {
             return fetch('/api/save-config', {
                 method: 'POST',
@@ -1036,7 +1072,9 @@
                     promo_code: document.getElementById('promo_code').value,
                     complete_transaction: document.getElementById('complete_transaction').checked,
                     send_email: document.getElementById('send_email').checked,
-                    deep_debug: document.getElementById('deep_debug').checked
+                    deep_debug: document.getElementById('deep_debug').checked,
+                    discovery_driver: document.getElementById('discovery_driver').value,
+                    enrollment_driver: document.getElementById('enrollment_driver').value
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
         }
@@ -1079,6 +1117,16 @@
                     saveConfigToEnv();
                 });
             });
+
+            ['discovery_driver', 'enrollment_driver'].forEach(function(id) {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('change', function() {
+                    if (id === 'discovery_driver') syncDeepScrapeUi();
+                    saveConfigToEnv();
+                });
+            });
+
+            syncDeepScrapeUi();
         }
 
         // ===== Manual: run schedule =====
@@ -1137,6 +1185,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver: document.getElementById('enrollment_driver').value,
                     schedule: schedulePayload
                 }));
             };
@@ -1258,7 +1307,11 @@
             activeWs = new WebSocket(`${protocol}//${window.location.host}/ws/scrape`);
 
             activeWs.onopen = function() {
-                activeWs.send(JSON.stringify({ email, password, student_id, scrape_days, scrape_locations, deep_scrape, deep_debug }));
+                activeWs.send(JSON.stringify({
+                    email, password, student_id, scrape_days, scrape_locations,
+                    deep_scrape, deep_debug,
+                    discovery_driver: document.getElementById('discovery_driver').value
+                }));
             };
 
             activeWs.onmessage = function(event) {
@@ -1406,6 +1459,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver: document.getElementById('enrollment_driver').value,
                     selected_classes: selected
                 }));
             };

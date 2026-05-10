@@ -74,10 +74,13 @@ The dashboard is a thin wrapper around `iclasspro.py`, which can also be run dir
 python3 iclasspro.py --help
 ```
 
+Use **`--driver playwright`** (default) or **`--driver api`** for the HTTP/Open API + JWT path; default can be set with `ICLASS_DRIVER`. Older scripts that call **`iclasspro_api.py`** still work: that script is a thin wrapper that runs `iclasspro.py --driver api`.
+
 Key flags at a glance:
 
 | Flag | Description |
 |---|---|
+| `--driver` | `playwright` (browser) or `api` (HTTP/JWT); overrides `ICLASS_DRIVER` |
 | `--schedule` | Path to a schedule JSON file |
 | `--scrape` | Discover available classes instead of enrolling |
 | `--scrape-days` | Comma-separated days to filter discovery (e.g. `Monday,Wednesday`) |
