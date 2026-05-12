@@ -5,6 +5,12 @@ __pycache__/
 screenshots/
 *.log
 schedules/tmp/
+
+# Personal schedules (repo ships a few JSON templates below — use `git add -f schedules/foo.json` if you add another intentional template)
+schedules/*.json
+!schedules/template_schedule.json
+!schedules/short_schedule.json
+!schedules/full_week_schedule.json
 storage_state.json
 run_report.json
 debug-artifacts/
