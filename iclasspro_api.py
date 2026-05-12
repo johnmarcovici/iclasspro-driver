@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backward-compatible launcher; prefer ``python iclasspro.py --driver api``."""
+"""Backward-compatible launcher; forwards to ``iclasspro.py`` with the same arguments."""
 
 import os
 import subprocess
@@ -10,10 +10,7 @@ _MAIN = os.path.join(_ROOT, "iclasspro.py")
 
 
 def main() -> int:
-    argv = sys.argv[1:]
-    if "--driver" not in argv:
-        argv = ["--driver", "api"] + argv
-    return subprocess.call([sys.executable, _MAIN] + argv)
+    return subprocess.call([sys.executable, _MAIN] + sys.argv[1:])
 
 
 if __name__ == "__main__":

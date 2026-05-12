@@ -92,7 +92,6 @@ WEEK_DAYS = [
     "Saturday",
 ]
 DAY_TO_QUERY_INDEX = {name.lower(): idx for idx, name in enumerate(WEEK_DAYS, start=1)}
-DAY_TO_INDEX = DAY_TO_QUERY_INDEX  # HTTP enrollment helpers
 logger = logging.getLogger(__name__)
 
 
@@ -430,24 +429,113 @@ class IClassPro:
         except Exception:
             return False
 
-    def _get_cart_item_count(self) -> int:
-        """Return an estimated number of cart items from the DOM."""
-        try:
-            selectors = [
-                ".products-wrap .list-group-item",
-                ".cart-item",
-                ".cartItem",
-                ".cart__item",
-                "[role='listitem']",
-            ]
-            for sel in selectors:
+    def _get_cart_item_count_dom_selectors(self) -> int:
+        """Line-item-style cart rows (mini-cart drawer, cart page, etc.)."""
+        selectors = [
+            ".products-wrap .list-group-item",
+            ".cart-item",
+            ".cartItem",
+            ".cart__item",
+            "[role='listitem']",
+            # iClassPro / Angular-style cart tables and lists
+            "table.table-striped tbody tr",
+            "table.cart tbody tr",
+            ".shopping-cart tbody tr",
+            "[class*='cart-item']",
+            "[class*='shopping-cart'] tbody tr",
+        ]
+        best = 0
+        for sel in selectors:
+            try:
                 count = self.page.locator(sel).count()
-                if count > 0:
-                    logger.debug(f"Found {count} cart items with selector '{sel}'.")
-                    return count
+                if count > best:
+                    logger.debug(f"Cart line selector '{sel}' matched {count} row(s).")
+                    best = count
+            except Exception:
+                continue
+        return best
+
+    def _get_cart_item_count_from_evaluate(self) -> int:
+        """Best-effort count from header badges and cart links (SPA often hides line items)."""
+        try:
+            return int(
+                self.page.evaluate(
+                    r"""() => {
+                        let best = 0;
+                        const parseIntLoose = (s) => {
+                            const m = String(s || '').replace(/,/g, '').match(/\d+/);
+                            return m ? parseInt(m[0], 10) : 0;
+                        };
+
+                        const bumpFromBadge = (root) => {
+                            if (!root) return;
+                            const badges = root.querySelectorAll(
+                                '.badge, .notification-badge, [class*="badge"], [class*="cart-count"], [data-count]'
+                            );
+                            for (const b of badges) {
+                                const n = parseIntLoose(b.textContent || '');
+                                if (n > best) best = n;
+                            }
+                        };
+
+                        const cartRoots = Array.from(
+                            document.querySelectorAll(
+                                'a[href*="/cart"], a[href*="cart"], [href*="shopping-cart"], [class*="mini-cart"], [class*="MiniCart"], [aria-label*="cart" i]'
+                            )
+                        );
+                        for (const el of cartRoots) {
+                            bumpFromBadge(el);
+                            const t = (el.textContent || '').replace(/\s+/g, ' ');
+                            const paren = t.match(/\((\d+)\)/);
+                            if (paren) {
+                                const n = parseInt(paren[1], 10);
+                                if (n > best) best = n;
+                            }
+                        }
+
+                        const lines = document.querySelectorAll(
+                            '.products-wrap .list-group-item, .cart-item, .cartItem, table.table-striped tbody tr, table.cart tbody tr'
+                        );
+                        if (lines.length > best) best = lines.length;
+
+                        return best;
+                    }"""
+                )
+                or 0
+            )
+        except Exception as e:
+            logger.debug(f"Cart count evaluate() failed: {e}")
+            return 0
+
+    def _get_cart_item_count(self) -> int:
+        """Estimated cart quantity from visible line items and header/cart badges."""
+        try:
+            return max(
+                self._get_cart_item_count_dom_selectors(),
+                self._get_cart_item_count_from_evaluate(),
+            )
         except Exception as e:
             logger.warning(f"Could not get cart item count from DOM: {e}")
-        return 0
+            return 0
+
+    def _cart_add_success_indicated(self) -> bool:
+        """True when the portal shows a post-add confirmation (cart count may lag)."""
+        try:
+            page_text = self.page.locator("body").inner_text(timeout=4000)
+        except Exception:
+            return False
+        lowered = " ".join(page_text.split()).lower()
+        phrases = (
+            "added to your cart",
+            "added to cart",
+            "successfully added",
+            "has been added to your cart",
+            "item has been added",
+            "class has been added",
+            "registration added",
+            "added to the cart",
+        )
+        return any(p in lowered for p in phrases)
 
     def _wait_for_cart_item_count(
         self, min_count: int = 1, timeout: int = 60000
@@ -463,6 +551,31 @@ class IClassPro:
             time.sleep(0.5)
         logger.warning("Timeout reached while waiting for cart item count.")
         return 0
+
+    def _wait_for_cart_add_confirmation(
+        self, initial_count: int, *, timeout_ms: int = 90000
+    ) -> tuple[bool, int, str]:
+        """Wait for line-item count increase or explicit add-to-cart success copy.
+
+        Returns ``(ok, last_observed_count, reason)`` where reason is
+        ``cart_items``, ``success_message``, or ``timeout``.
+        """
+        logger.info(
+            "Waiting for cart confirmation (items or success message)..."
+        )
+        deadline = time.time() + timeout_ms / 1000.0
+        while time.time() < deadline:
+            if self._cart_add_success_indicated():
+                n = self._get_cart_item_count()
+                logger.info("Detected add-to-cart success message in page text.")
+                return True, max(initial_count + 1, n), "success_message"
+            n = self._get_cart_item_count()
+            if n >= initial_count + 1:
+                logger.info(f"Cart item count is now {n}.")
+                return True, n, "cart_items"
+            time.sleep(0.45)
+        n = self._get_cart_item_count()
+        return False, n, "timeout"
 
     def _wait_for_login_ui(self, timeout: int = 15000) -> str:
         """Wait until the login form or a portal modal becomes interactable."""
@@ -581,21 +694,27 @@ class IClassPro:
     def _wait_for_class_detail_ready(self, timeout: Optional[int] = None) -> None:
         """Wait until the class-details view is rendered and actionable.
 
-        Prefers UI-state readiness signals (Enroll Now button or detail labels)
-        over URL navigation; the URL change is treated as one of several
-        equivalent positive signals so SPA renders without a full navigation
-        still resolve."""
+        Do **not** treat ``/class-details/`` in the URL alone as ready: the SPA
+        often paints the shell before enroll controls hydrate. Wait for Enroll /
+        Add to Cart / detail chrome instead.
+        """
         timeout = timeout or self._class_detail_timeout_ms
         deadline = time.time() + timeout / 1000.0
         last_error = None
         enroll_pattern = re.compile(r"Enroll Now!?", re.IGNORECASE)
+        add_pattern = re.compile(r"Add to Cart", re.IGNORECASE)
         detail_text_re = "text=/Class Details|Sessions:|Available for/i"
         while time.time() < deadline:
             try:
-                if "/class-details/" in (self.page.url or ""):
-                    return
+                if "/class-details/" not in (self.page.url or ""):
+                    self.page.wait_for_timeout(400)
+                    continue
                 if self.page.get_by_role(
                     "button", name=enroll_pattern
+                ).first.is_visible():
+                    return
+                if self.page.get_by_role(
+                    "button", name=add_pattern
                 ).first.is_visible():
                     return
                 if self.page.locator(detail_text_re).first.is_visible():
@@ -648,6 +767,49 @@ class IClassPro:
             except Exception:
                 pass
             self.page.wait_for_timeout(400)
+
+    def _wait_for_post_enroll_before_add_to_cart(
+        self,
+        add_to_cart_pattern,
+        *,
+        timeout_ms: Optional[int] = None,
+    ) -> None:
+        """After Enroll Now, wait for loading overlays to clear and for an Add to
+        Cart control to become visible — no fixed sleep; readiness is inferred from
+        the DOM (same idea as waiting for the page to finish rendering)."""
+        timeout_ms = timeout_ms or self._class_detail_timeout_ms
+        deadline = time.time() + timeout_ms / 1000.0
+        logger.info("Waiting for Add to Cart control after Enroll Now...")
+        while time.time() < deadline:
+            self._wait_for_portal_idle(timeout=min(12000, timeout_ms))
+            try:
+                b = self.page.get_by_role(
+                    "button", name=add_to_cart_pattern
+                ).first
+                if b.count() > 0 and b.is_visible():
+                    logger.info("Add to Cart is visible (role=button).")
+                    return
+            except Exception:
+                pass
+            try:
+                loc = self.page.locator("button:has-text('Add to Cart')").first
+                if loc.count() > 0 and loc.is_visible():
+                    logger.info("Add to Cart is visible (button text).")
+                    return
+            except Exception:
+                pass
+            try:
+                loc = self.page.locator("a:has-text('Add to Cart')").first
+                if loc.count() > 0 and loc.is_visible():
+                    logger.info("Add to Cart is visible (link).")
+                    return
+            except Exception:
+                pass
+            self.page.wait_for_timeout(450)
+
+        raise RuntimeError(
+            f"Add to Cart did not become visible within {timeout_ms} ms after Enroll Now."
+        )
 
     def _detect_idempotency_state(self) -> str:
         """Return a label if the class detail page indicates the class is
@@ -1070,146 +1232,124 @@ class IClassPro:
                     self._wait_for_class_detail_ready()
                     self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
 
-        # Some class detail pages present Add to Cart directly without a
-        # separate Enroll Now gate. Prefer direct Add to Cart if visible.
+        # iClassPro flow is always: Enroll Now → Add to Cart (no shortcut path).
         dismiss_non_enrollment_modals()
         ensure_authenticated_detail_view()
-        add_to_cart_role = self.page.get_by_role(
-            "button", name=add_to_cart_pattern
-        ).first
-        add_to_cart_text = self.page.locator("button:has-text('Add to Cart')").first
-        enroll_role = self.page.get_by_role("button", name=enroll_pattern).first
-        enroll_now_text = self.page.locator("button:has-text('Enroll Now')").first
 
-        direct_add_visible = False
-        for add_locator in (add_to_cart_role, add_to_cart_text):
-            try:
-                if add_locator.is_visible():
-                    direct_add_visible = True
-                    break
-            except Exception:
-                pass
+        def _any_enroll_or_add_control_visible() -> bool:
+            for loc in (
+                self.page.get_by_role("button", name=add_to_cart_pattern).first,
+                self.page.locator("button:has-text('Add to Cart')").first,
+                self.page.get_by_role("button", name=enroll_pattern).first,
+                self.page.locator("button:has-text('Enroll Now')").first,
+            ):
+                try:
+                    if loc.is_visible():
+                        return True
+                except Exception:
+                    pass
+            return False
 
-        enroll_visible = False
-        for enroll_locator in (enroll_role, enroll_now_text):
-            try:
-                if enroll_locator.is_visible():
-                    enroll_visible = True
-                    break
-            except Exception:
-                pass
-
-        # Only force Select Students flow when neither Add to Cart nor Enroll
-        # controls are currently visible.
-        if not direct_add_visible and not enroll_visible:
+        if not _any_enroll_or_add_control_visible():
             ensure_student_selected()
             ensure_authenticated_detail_view()
             dismiss_non_enrollment_modals()
-            for add_locator in (add_to_cart_role, add_to_cart_text):
+
+        def click_enroll_now():
+            # Some portals require opening the "View Available Dates" modal
+            # before any enroll/add controls are rendered.
+            last_error = None
+            for pass_idx in range(2):
                 try:
-                    if add_locator.is_visible():
-                        direct_add_visible = True
-                        break
-                except Exception:
-                    pass
-
-        if not direct_add_visible:
-
-            def click_enroll_now():
-                # Some portals require opening the "View Available Dates" modal
-                # before any enroll/add controls are rendered.
-                last_error = None
-                for pass_idx in range(2):
-                    try:
-                        view_dates = self.page.locator(
-                            "a:has-text('View Available Dates')"
-                        ).first
-                        if view_dates.is_visible():
-                            view_dates.click(timeout=20000)
-                            self._wait_for_portal_idle(
-                                timeout=self._class_detail_timeout_ms
-                            )
-                    except Exception:
-                        pass
-
-                    dismiss_non_enrollment_modals()
-                    candidates = [
-                        self.page.get_by_role("button", name=enroll_pattern).first,
-                        self.page.locator(
-                            "customer-portal-class-details button:has-text('Enroll Now')"
-                        ).first,
-                        self.page.locator("button:has-text('Enroll Now')").first,
-                        self.page.locator("a:has-text('Enroll Now')").first,
-                        # Modal/session-specific controls
-                        self.page.locator(
-                            ".modal-view-dates button:has-text('Enroll')"
-                        ).first,
-                        self.page.locator(
-                            ".modal-view-dates a:has-text('Enroll')"
-                        ).first,
-                        self.page.locator(
-                            ".modal-view-dates button:has-text('Add to Cart')"
-                        ).first,
-                        # Some flows require a modal "Continue" before rendering
-                        # Add to Cart controls.
-                        self.page.locator(
-                            ".modal.show button:has-text('Continue')"
-                        ).first,
-                    ]
-                    saw_candidate = False
-                    for ctl in candidates:
-                        try:
-                            if ctl.count() == 0:
-                                continue
-                            saw_candidate = True
-                            ctl.scroll_into_view_if_needed(timeout=15000)
-                            ctl.wait_for(state="visible", timeout=10000)
-                            ctl.click(timeout=20000)
-                            return
-                        except Exception as e:
-                            last_error = e
-
-                    if (
-                        pass_idx == 0
-                        and not saw_candidate
-                        and "/class-details/" in (self.page.url or "")
-                    ):
-                        logger.info(
-                            "No enrollment controls rendered; reloading class-details once."
-                        )
-                        self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                    view_dates = self.page.locator(
+                        "a:has-text('View Available Dates')"
+                    ).first
+                    if view_dates.is_visible():
+                        view_dates.click(timeout=20000)
                         self._wait_for_portal_idle(
                             timeout=self._class_detail_timeout_ms
                         )
-                        continue
-                # Persist a focused artifact when enroll controls are missing.
-                try:
-                    button_samples = self.page.locator("button").all_inner_texts()[:40]
                 except Exception:
-                    button_samples = []
-                try:
-                    link_samples = self.page.locator("a").all_inner_texts()[:60]
-                except Exception:
-                    link_samples = []
-                self._write_debug_artifacts(
-                    "enroll_control_missing",
-                    {
-                        "class_index": class_index,
-                        "page_url": self.page.url if self.page else "",
-                        "buttons": button_samples,
-                        "links": link_samples,
-                        "error": str(last_error) if last_error else "unknown",
-                    },
-                )
-                raise last_error or RuntimeError("No clickable enroll control found.")
+                    pass
 
-            _retry(
-                click_enroll_now,
-                action_name="Click enrollment control",
-                attempts=3,
-                base_delay=1.5,
-                max_delay=6.0,
+                dismiss_non_enrollment_modals()
+                candidates = [
+                    self.page.get_by_role("button", name=enroll_pattern).first,
+                    self.page.locator(
+                        "customer-portal-class-details button:has-text('Enroll Now')"
+                    ).first,
+                    self.page.locator("button:has-text('Enroll Now')").first,
+                    self.page.locator("a:has-text('Enroll Now')").first,
+                    # Modal/session-specific controls
+                    self.page.locator(
+                        ".modal-view-dates button:has-text('Enroll')"
+                    ).first,
+                    self.page.locator(
+                        ".modal-view-dates a:has-text('Enroll')"
+                    ).first,
+                    # Some flows require a modal "Continue" before rendering Add to Cart.
+                    self.page.locator(
+                        ".modal.show button:has-text('Continue')"
+                    ).first,
+                ]
+                saw_candidate = False
+                for ctl in candidates:
+                    try:
+                        if ctl.count() == 0:
+                            continue
+                        saw_candidate = True
+                        ctl.scroll_into_view_if_needed(timeout=15000)
+                        ctl.wait_for(state="visible", timeout=10000)
+                        ctl.click(timeout=20000)
+                        return
+                    except Exception as e:
+                        last_error = e
+
+                if (
+                    pass_idx == 0
+                    and not saw_candidate
+                    and "/class-details/" in (self.page.url or "")
+                ):
+                    logger.info(
+                        "No enrollment controls rendered; reloading class-details once."
+                    )
+                    self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                    self._wait_for_portal_idle(
+                        timeout=self._class_detail_timeout_ms
+                    )
+                    continue
+            # Persist a focused artifact when enroll controls are missing.
+            try:
+                button_samples = self.page.locator("button").all_inner_texts()[:40]
+            except Exception:
+                button_samples = []
+            try:
+                link_samples = self.page.locator("a").all_inner_texts()[:60]
+            except Exception:
+                link_samples = []
+            self._write_debug_artifacts(
+                "enroll_control_missing",
+                {
+                    "class_index": class_index,
+                    "page_url": self.page.url if self.page else "",
+                    "buttons": button_samples,
+                    "links": link_samples,
+                    "error": str(last_error) if last_error else "unknown",
+                },
             )
+            raise last_error or RuntimeError("No clickable enroll control found.")
+
+        logger.info("Step 1/2: Enroll Now.")
+        _retry(
+            click_enroll_now,
+            action_name="Click enrollment control",
+            attempts=3,
+            base_delay=1.5,
+            max_delay=6.0,
+        )
+        dismiss_non_enrollment_modals()
+        self._wait_for_portal_idle(timeout=self._class_detail_timeout_ms)
+        self._wait_for_post_enroll_before_add_to_cart(add_to_cart_pattern)
 
         initial_cart_count = self._get_cart_item_count()
 
@@ -1238,8 +1378,9 @@ class IClassPro:
             )
             raise last_error or RuntimeError("No clickable Add to Cart control found.")
 
+        logger.info("Step 2/2: Add to Cart.")
         _retry(click_add_to_cart, action_name="Click 'Add to Cart'", attempts=3)
-        self.page.wait_for_timeout(1500)
+        self.page.wait_for_timeout(2500)
 
         enrollment_issue = self._get_enrollment_issue()
         if enrollment_issue:
@@ -1248,28 +1389,35 @@ class IClassPro:
                 raise EnrollmentSkipped(enrollment_issue)
             raise RuntimeError(enrollment_issue)
 
-        final_cart_count = self._wait_for_cart_item_count(
-            min_count=initial_cart_count + 1
+        ok_confirm, final_cart_count, confirm_reason = (
+            self._wait_for_cart_add_confirmation(
+                initial_cart_count, timeout_ms=90000
+            )
         )
         logger.info(
-            f"Cart count after add attempt: initial={initial_cart_count}, observed={final_cart_count}"
+            f"Cart add confirmation ({confirm_reason}): initial={initial_cart_count}, "
+            f"observed={final_cart_count}, ok={ok_confirm}"
         )
-        if final_cart_count < initial_cart_count + 1:
-            # Fallback: some tenant UIs do not expose cart line items on the
-            # class-details page even after successful enrollment.
+
+        if not ok_confirm:
+            # Fallback: cart line items / badges often only render on /cart.
             try:
                 cart_url = self.base_url.rstrip("/") + "/cart"
                 self._goto(cart_url, description="cart verification")
                 self._wait_for_portal_idle(timeout=15000)
-                final_cart_count = self._get_cart_item_count()
-                if final_cart_count >= initial_cart_count + 1:
-                    logger.info(
-                        f"Verified cart item count on cart page: {final_cart_count}."
+                ok_confirm, final_cart_count, confirm_reason = (
+                    self._wait_for_cart_add_confirmation(
+                        initial_cart_count, timeout_ms=25000
                     )
+                )
+                logger.info(
+                    f"Cart page re-check ({confirm_reason}): "
+                    f"initial={initial_cart_count}, observed={final_cart_count}, ok={ok_confirm}"
+                )
             except Exception as e:
                 logger.debug(f"Cart-page verification fallback failed: {e}")
 
-        if final_cart_count < initial_cart_count + 1:
+        if not ok_confirm:
             idempotency_state = self._detect_idempotency_state()
             if idempotency_state == "already_enrolled":
                 raise EnrollmentSkipped("Class is already enrolled.")
@@ -2129,274 +2277,6 @@ class IClassPro:
 
         logger.info("Cart processing complete.")
 
-    def scrape_classes(
-        self,
-        student_id: int,
-        days_filter: list = None,
-        locations_filter: list = None,
-        deep_scrape: bool = False,
-    ) -> list:
-        """Scrape available classes from the portal, iterating over each day.
-
-        Args:
-            student_id: Portal student ID.
-            days_filter: Optional list of day names (e.g. ["Sunday", "Monday"]) to
-                limit which days are fetched.  When None or empty, all 7 days are
-                scraped.
-            locations_filter: Optional list of location strings (e.g. ["Culver",
-                "El Segundo"]) to keep.  When None or empty, all locations are kept.
-            deep_scrape: If True, open each class in a new tab to extract the actual
-                deep-link URL and instructor name, then close the tab.
-        """
-        discovered = []
-        # Deduplicate by (day, time, name) rather than by href/URL, because
-        # JS-navigated class cards often share a placeholder href (e.g. "#") which
-        # would cause every class after the first to be dropped as a "duplicate".
-        seen_keys = set()
-
-        # Normalise filter lists so comparisons are case-insensitive
-        days_filter_norm = (
-            [d.strip().lower() for d in days_filter if d.strip()] if days_filter else []
-        )
-        locations_filter_norm = (
-            [l.strip().lower() for l in locations_filter if l.strip()]
-            if locations_filter
-            else []
-        )
-
-        days_to_scrape = [
-            (idx, name)
-            for idx, name in enumerate(WEEK_DAYS, start=1)
-            if not days_filter_norm or name.lower() in days_filter_norm
-        ]
-        if days_filter_norm:
-            logger.info(f"Day filter active: scraping {[n for _, n in days_to_scrape]}")
-        if locations_filter_norm:
-            logger.info(f"Location filter active: keeping {locations_filter_norm}")
-
-        for day_idx, day_name in days_to_scrape:
-            logger.info(f"Scraping classes for {day_name}...")
-            url = f"{self.base_url}classes?days={day_idx}&selectedStudents={student_id}"
-            self._goto(url, description=f"{day_name} class list")
-            self.page.wait_for_timeout(2000)
-            # Scroll to the bottom so any lazily-rendered class cards are added to the DOM
-            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            self.page.wait_for_timeout(1000)
-            self.take_screenshot(f"scrape_{day_name.lower()}.png", full_page=True)
-            if self._deep_debug:
-                try:
-                    raw_anchor_count = self.page.locator("a").count()
-                except Exception:
-                    raw_anchor_count = -1
-                self._write_debug_artifacts(
-                    f"scrape_day_{day_name.lower()}",
-                    {
-                        "mode": "scrape",
-                        "day": day_name,
-                        "day_index": day_idx,
-                        "url": url,
-                        "student_id": student_id,
-                        "raw_anchor_count": raw_anchor_count,
-                    },
-                )
-
-            # Strategy: iterate every anchor on the page and keep only those
-            # whose text contains a time pattern (e.g. "at 10:30am").  These
-            # are the card-wrapper anchors that carry the class name/time in
-            # their text_content().  They typically have href="/scaq" (SPA
-            # root) so the class ID cannot be read from their own href.
-            # Instead, for each such anchor we search the nearest parent
-            # container (walking up the DOM) for a sibling "View Available
-            # Dates" link whose href does contain the class-details path.
-            all_anchors = self.page.locator("a").all()
-            for anchor in all_anchors:
-                try:
-                    text = (anchor.text_content() or "").strip()
-                    href = anchor.get_attribute("href") or ""
-
-                    # Only process links whose text contains a time pattern
-                    time_match = _TIME_RE.search(text)
-                    if not time_match or not href:
-                        continue
-
-                    # Skip bare "at TIME" links (navigation/filter anchors).
-                    # Real class-card links always have content before the time.
-                    text_prefix = _TIME_RE.sub("", text).strip()
-                    if not text_prefix:
-                        continue
-
-                    # --- Build the class detail URL ---
-                    # First check if this anchor's own href already has the ID.
-                    # If not, traverse upward in the DOM to find a sibling
-                    # "class-details" link that carries the numeric class ID.
-                    class_id_match = re.search(r"/class-details/(\d+)", href)
-                    if not class_id_match:
-                        details_href = anchor.evaluate(
-                            r"""el => {
-                            let node = el.parentElement;
-                            while (node && node.tagName !== 'BODY') {
-                                const links = node.querySelectorAll(
-                                    "a[href*='class-details']"
-                                );
-                                for (const lnk of links) {
-                                    const h = lnk.getAttribute('href') || '';
-                                    if (/\/class-details\/\d+/.test(h)) return h;
-                                }
-                                node = node.parentElement;
-                            }
-                            return '';
-                        }"""
-                        )
-                        class_id_match = re.search(
-                            r"/class-details/(\d+)", details_href
-                        )
-
-                    if class_id_match:
-                        filters_json = json.dumps(
-                            {"students": str(student_id), "days": str(day_idx)}
-                        )
-                        class_url = (
-                            f"{self.base_url.rstrip('/')}/class-details/{class_id_match.group(1)}"
-                            f"?selectedStudents={student_id}&filters={quote(filters_json)}"
-                        )
-                    else:
-                        # Only honour the anchor's own href if it actually
-                        # points to a /class-details/<id> URL. Otherwise leave
-                        # the URL blank so downstream code falls back to the
-                        # search-based opener instead of being misled by an
-                        # SPA-root href like "/scaq".
-                        candidate_url = (
-                            href
-                            if href.startswith("http")
-                            else urljoin(self.base_url, href)
-                        )
-                        if re.search(r"/class-details/\d+", candidate_url):
-                            class_url = candidate_url
-                        else:
-                            class_url = ""
-
-                    time_str = time_match.group(1)
-
-                    # --- Extract the class title (name) ---
-                    # The card anchor's text_content() includes the full card:
-                    #   "Location:Day MM/DD at TIME - CourseType Day|HH:MM AM – HH:MM AM
-                    #    View Available Dates SMTWTFS44 Open"
-                    # Primary: look for a heading-like element inside the anchor.
-                    # Fallback: split on the "DayAbbr|" metadata separator or keywords.
-                    name = ""
-                    try:
-                        heading_el = anchor.locator(
-                            "h1, h2, h3, h4, h5, h6, strong, b"
-                        ).first
-                        candidate = (heading_el.text_content() or "").strip()
-                        if candidate and _TIME_RE.search(candidate):
-                            name = candidate
-                    except Exception:
-                        pass
-
-                    if not name:
-                        for split_pat in (
-                            r"\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s*\|",
-                            r"\s+(?:Available\b|View\b)",
-                        ):
-                            parts = re.split(
-                                split_pat, text, maxsplit=1, flags=re.IGNORECASE
-                            )
-                            if len(parts) > 1:
-                                name = parts[0].strip()
-                                break
-
-                    if not name:
-                        name = text_prefix or text
-
-                    location = ""
-
-                    # --- Location extraction ---
-                    colon_idx = name.find(":")
-                    if colon_idx > 0:
-                        prefix = name[:colon_idx].strip()
-                        for loc in self.KNOWN_LOCATIONS:
-                            if (
-                                loc.lower() == prefix.lower()
-                                or loc.lower() in prefix.lower()
-                            ):
-                                location = loc
-                                break
-
-                    if not location:
-                        for loc in self.KNOWN_LOCATIONS:
-                            if loc.lower() in name.lower():
-                                location = loc
-                                break
-
-                    # Apply location filter (if requested)
-                    if (
-                        locations_filter_norm
-                        and location.lower() not in locations_filter_norm
-                    ):
-                        continue
-
-                    # Deduplicate by (day, time, name)
-                    dedup_key = (day_name, time_str, name)
-                    if dedup_key in seen_keys:
-                        continue
-                    seen_keys.add(dedup_key)
-
-                    discovered.append(
-                        {
-                            "name": name,
-                            "Location": location,
-                            "Day": day_name,
-                            "Time": time_str,
-                            "url": class_url,
-                        }
-                    )
-                    logger.info(
-                        f"  Found: {day_name} at {time_str} — {name}"
-                        f" ({location or 'location unknown'})"
-                    )
-                except Exception as e:
-                    logger.debug(f"Error processing anchor: {e}")
-
-        logger.info(f"Discovery complete. Found {len(discovered)} class(es).")
-
-        # --- Deep scrape phase: extract actual URLs and instructor info ---
-        if deep_scrape and discovered:
-            logger.info(
-                "Starting deep-scrape phase using the enrollment click-through flow..."
-            )
-            for idx, cls in enumerate(discovered):
-                try:
-                    class_name = cls.get("name", "Unknown")
-                    logger.info(
-                        f"Deep-scraping class {idx + 1}/{len(discovered)}: {class_name}"
-                    )
-
-                    self._open_class_detail_page(
-                        location=cls.get("Location") or cls.get("location", ""),
-                        timestr=cls.get("Time") or cls.get("time", ""),
-                        daystr=cls.get("Day") or cls.get("day", ""),
-                        student_id=student_id,
-                        class_index=idx,
-                    )
-
-                    deep_url = self.page.url
-                    cls["url"] = deep_url
-                    logger.info(f"  Extracted URL: {deep_url}")
-
-                    instructor_name = self._extract_detail_field("Instructor")
-                    cls["instructor"] = instructor_name
-                    if instructor_name:
-                        logger.info(f"  Extracted instructor: {instructor_name}")
-                    else:
-                        logger.debug("  Instructor field not found")
-                except Exception as e:
-                    logger.warning(f"Failed to deep-scrape class {idx}: {e}")
-
-            logger.info("Deep-scrape phase complete.")
-
-        return discovered
-
     def enroll_by_url(self, url: str, class_index: int) -> None:
         """Navigate directly to a class URL and add it to the cart."""
         logger.info(f"Enrolling via direct URL: {url}")
@@ -2434,15 +2314,9 @@ class IClassPro:
 
 
 # =============================================================================
-# HTTP / REST driver (Open API discovery + JWT cart/checkout)
+# Open API — class discovery (public catalog; no authentication)
 # =============================================================================
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-API_BASE = "https://app.iclasspro.com/api/jwt/v1"
-LOGIN_URL = f"{API_BASE}/login"
-# Public read-only API (no login). Same data the portal SPA uses for class lists.
 OPEN_API_BASE = "https://app.iclasspro.com/api/open/v1"
 
 _PLAIN_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})(am|pm)", re.IGNORECASE)
@@ -2450,7 +2324,7 @@ _OPEN_PLAIN_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})\s*([AP]M)$", re.IGNORECASE
 
 
 def _default_portal_slug() -> str:
-    """Org slug for JWT `account` (same as the first path segment of the portal URL)."""
+    """Org slug (first path segment of the portal URL), e.g. ``scaq`` for ``/scaq/classes``."""
     env_portal = (os.getenv("ICLASS_PORTAL") or "").strip()
     if env_portal:
         return env_portal
@@ -2466,7 +2340,7 @@ def _default_portal_slug() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Time utilities (HTTP enrollment matching)
+# Time helpers (Open API schedule strings)
 # ---------------------------------------------------------------------------
 def _http_normalize_schedule_time(raw: str) -> str:
     """Normalise a time string to canonical 'H:MMam' form."""
@@ -2485,12 +2359,6 @@ def _http_normalize_schedule_time(raw: str) -> str:
             h -= 12
         return f"{h}:{mn}{period}"
     return raw
-
-
-def _http_times_match(schedule_time: str, class_time: str) -> bool:
-    return _http_normalize_schedule_time(
-        schedule_time
-    ) == _http_normalize_schedule_time(class_time)
 
 
 def _normalize_open_time(raw: str) -> str:
@@ -2604,326 +2472,6 @@ def scrape_classes_open(
     return results
 
 
-# ---------------------------------------------------------------------------
-# API client
-# ---------------------------------------------------------------------------
-class IClassProAPIClient:
-    """Thin wrapper around the iClassPro JWT REST API."""
-
-    def __init__(self, email: str, password: str, portal: Optional[str] = None) -> None:
-        self.email = email
-        self.password = password
-        self.portal = portal if portal else _default_portal_slug()
-        self.token: Optional[str] = None
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Accept": "application/json, text/plain, */*",
-                "Content-Type": "application/json",
-                "Origin": "https://portal.iclasspro.com",
-                "Referer": f"https://portal.iclasspro.com/{self.portal}/",
-            }
-        )
-
-    # ------------------------------------------------------------------
-    # Auth
-    # ------------------------------------------------------------------
-    def login(self) -> str:
-        """Authenticate and store the JWT token."""
-        logger.info("Logging in as %s (account=%s)...", self.email, self.portal)
-        # JWT `/login` expects `account` (organization slug), not `portal`.
-        payload = {
-            "email": self.email,
-            "password": self.password,
-            "account": self.portal,
-        }
-        resp = self.session.post(LOGIN_URL, json=payload, timeout=30)
-        if resp.status_code >= 400:
-            try:
-                body = resp.json()
-                msg = body.get("message") or body.get("error") or resp.text
-            except ValueError:
-                msg = resp.text or resp.reason
-            raise RuntimeError(f"Login failed ({resp.status_code}): {msg}") from None
-        data = resp.json()
-        # Token may be top-level or nested under "data"
-        self.token = (
-            data.get("token")
-            or data.get("access_token")
-            or data.get("jwt")
-            or (data.get("data") or {}).get("token")
-        )
-        if not self.token:
-            raise RuntimeError(f"Login response contained no token: {data}")
-        logger.info("Login successful.")
-        return self.token
-
-    def _get(self, path: str, params: Optional[dict] = None, **kwargs) -> Any:
-        """Authenticated GET — appends token automatically."""
-        if not self.token:
-            self.login()
-        p = dict(params or {})
-        p["token"] = self.token
-        resp = self.session.get(f"{API_BASE}/{path}", params=p, timeout=30, **kwargs)
-        resp.raise_for_status()
-        return resp.json()
-
-    def _post(
-        self, path: str, payload: dict, params: Optional[dict] = None, **kwargs
-    ) -> Any:
-        """Authenticated POST — appends token automatically."""
-        if not self.token:
-            self.login()
-        p = dict(params or {})
-        p["token"] = self.token
-        resp = self.session.post(
-            f"{API_BASE}/{path}", json=payload, params=p, timeout=30, **kwargs
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    # ------------------------------------------------------------------
-    # Data retrieval
-    # ------------------------------------------------------------------
-    def get_students(self) -> list:
-        return self._get("students")
-
-    def get_sessions(self, student_ids: str = "") -> list:
-        return self._get("sessions", params={"students": student_ids})
-
-    def get_classes(
-        self,
-        *,
-        day_index: Optional[int] = None,
-        location_filter: Optional[str] = None,
-        student_id: Optional[int] = None,
-    ) -> list:
-        """Fetch classes with optional day/location/student filters."""
-        params: dict[str, Any] = {}
-        if day_index is not None:
-            params["dayOfWeek"] = day_index
-        if student_id is not None:
-            params["selectedStudentIds"] = student_id
-        classes = self._get("classes", params=params)
-        if location_filter:
-            lf = location_filter.lower()
-            classes = [
-                c
-                for c in classes
-                if lf in (c.get("location") or c.get("name") or "").lower()
-            ]
-        return classes
-
-    def get_class_detail(self, class_id: int, student_id: Optional[int] = None) -> dict:
-        """Return full detail for a single class including sessions."""
-        params: dict[str, Any] = {}
-        if student_id is not None:
-            params["selectedStudentIds"] = student_id
-        return self._get(f"classes/{class_id}", params=params)
-
-    def get_cart(self) -> list:
-        return self._get("cart")
-
-    def get_payment_methods(self) -> list:
-        return self._get("family-payment-method")
-
-    # ------------------------------------------------------------------
-    # Cart & checkout
-    # ------------------------------------------------------------------
-    def add_to_cart(self, class_id: int, session_id: int, student_id: int) -> dict:
-        """Add a class/session to the cart."""
-        payload = {
-            "objectId": class_id,
-            "objectType": "session",
-            "sessionId": session_id,
-            "selectedStudentIds": [student_id],
-        }
-        logger.info(
-            "Adding to cart: class=%d session=%d student=%d",
-            class_id,
-            session_id,
-            student_id,
-        )
-        return self._post("validate-cart-item", payload)
-
-    def apply_promo_code(self, code: str) -> dict:
-        """Apply a promo/discount code to the cart."""
-        logger.info("Applying promo code: %s", code)
-        return self._post("cart/promo-code", {"promoCode": code})
-
-    def checkout(
-        self,
-        payment_method_id: Optional[int] = None,
-        *,
-        complete_transaction: bool = True,
-    ) -> dict:
-        """Submit the cart for payment.
-
-        If complete_transaction is False this is a dry-run — logs intent but
-        does not submit (mirrors --complete-transaction semantics in iclasspro.py).
-        """
-        if not complete_transaction:
-            logger.info("Dry-run: skipping checkout (complete_transaction=False).")
-            return {
-                "dry_run": True,
-                "message": "Transaction not submitted (dry-run mode).",
-            }
-
-        payload: dict[str, Any] = {}
-        if payment_method_id is not None:
-            payload["paymentMethodId"] = payment_method_id
-
-        logger.info("Submitting checkout...")
-        return self._post("checkout", payload)
-
-
-# ---------------------------------------------------------------------------
-# High-level enrollment logic
-# ---------------------------------------------------------------------------
-def _find_matching_class(
-    classes: list,
-    location: str,
-    time_str: str,
-    day: str,
-) -> Optional[dict]:
-    """Return the first class matching location + time + day."""
-    day_idx = DAY_TO_INDEX.get(day.lower())
-    for cls in classes:
-        cls_loc = (cls.get("location") or cls.get("name") or "").lower()
-        cls_time = str(
-            cls.get("startTime") or cls.get("time") or cls.get("start_time") or ""
-        )
-        cls_day = cls.get("dayOfWeek") or cls.get("day_of_week") or 0
-        if isinstance(cls_day, str):
-            cls_day = DAY_TO_INDEX.get(cls_day.lower(), 0)
-
-        loc_ok = location.lower() in cls_loc
-        time_ok = _http_times_match(time_str, cls_time)
-        day_ok = (day_idx is None) or (cls_day == day_idx)
-
-        if loc_ok and time_ok and day_ok:
-            return cls
-    return None
-
-
-def enroll_from_schedule(
-    client: IClassProAPIClient,
-    schedule: list,
-    student_id: int,
-    promo_code: Optional[str] = None,
-    complete_transaction: bool = False,
-) -> tuple[list, Optional[dict]]:
-    """Add each schedule entry to the cart, then checkout once (matches iclasspro.py).
-
-    Returns ``(per_entry_summary, checkout_response)`` where ``checkout_response``
-    is None when nothing was added to the cart or checkout was not attempted.
-    """
-    summary: list = []
-    added_count = 0
-
-    for entry in schedule:
-        location = entry.get("Location", "")
-        time_str = entry.get("Time", "")
-        day = entry.get("Day", "")
-        label = f"{location} {day} {time_str}"
-
-        logger.info("── Processing: %s", label)
-        result: dict[str, Any] = {
-            "label": label,
-            "location": location,
-            "time": time_str,
-            "day": day,
-        }
-
-        try:
-            day_idx = DAY_TO_INDEX.get(day.lower())
-            if day_idx is None:
-                raise ValueError(f"Unknown day: {day!r}")
-
-            # 1. Fetch + filter classes
-            classes = client.get_classes(
-                day_index=day_idx,
-                location_filter=location,
-                student_id=student_id,
-            )
-            logger.info(
-                "  %d class(es) found for %s on %s", len(classes), location, day
-            )
-
-            # 2. Match by time
-            matched = _find_matching_class(classes, location, time_str, day)
-            if matched is None:
-                raise ValueError(f"No class found for {label}")
-
-            class_id = matched.get("id") or matched.get("classId")
-            logger.info(
-                "  Matched class id=%s: %s",
-                class_id,
-                matched.get("name") or matched.get("location"),
-            )
-
-            # 3. Get session id
-            detail = client.get_class_detail(class_id, student_id=student_id)
-            sessions = (
-                detail.get("sessions")
-                or (detail.get("data") or {}).get("sessions")
-                or []
-            )
-            if not sessions:
-                raw = client.get_sessions(student_ids=str(student_id))
-                sessions = [s for s in raw if str(s.get("classId")) == str(class_id)]
-            if not sessions:
-                raise ValueError(f"No sessions found for class {class_id}")
-
-            session = sessions[0]
-            session_id = session.get("id") or session.get("sessionId")
-            logger.info("  Session id=%s", session_id)
-
-            # 4. Guard: already enrolled?
-            if any(
-                str(s.get("status", "")).lower() in ("enrolled", "active")
-                for s in sessions
-                if str(s.get("studentId")) == str(student_id)
-            ):
-                raise EnrollmentSkipped(f"Already enrolled in {label}")
-
-            # 5. Add to cart (checkout happens once after all rows — same as browser driver)
-            client.add_to_cart(class_id, session_id, student_id)
-            added_count += 1
-
-            result["status"] = "Success"
-            result["details"] = "Added to cart"
-
-        except EnrollmentSkipped as exc:
-            logger.info("  Skipped: %s", exc.reason)
-            result["status"] = "Skipped"
-            result["details"] = exc.reason
-
-        except Exception as exc:
-            logger.error("  Failed to enroll in %s: %s", label, exc)
-            result["status"] = "Failed"
-            result["details"] = str(exc)
-
-        summary.append(result)
-
-    checkout_result: Optional[dict] = None
-    if added_count > 0:
-        if promo_code:
-            try:
-                client.apply_promo_code(promo_code)
-            except Exception as exc:
-                logger.warning("Promo code failed (continuing to checkout): %s", exc)
-
-        pms = client.get_payment_methods()
-        pm_id = pms[0].get("id") if pms else None
-        checkout_result = client.checkout(
-            pm_id, complete_transaction=complete_transaction
-        )
-        logger.info("Checkout: %s", str(checkout_result)[:200])
-
-    return summary, checkout_result
-
-
 def _setup_logging_http(level: int = logging.INFO) -> None:
     logging.basicConfig(
         level=level,
@@ -2934,8 +2482,8 @@ def _setup_logging_http(level: int = logging.INFO) -> None:
     )
 
 
-def main_http(args: argparse.Namespace) -> int:
-    """Run --driver api: Open API scrape or JWT enrollment."""
+def open_api_discovery_cli(args: argparse.Namespace) -> int:
+    """Discover classes via the public Open API (``--scrape``)."""
     _setup_logging_http(logging.DEBUG if args.deep_debug else logging.INFO)
 
     if not args.student_id:
@@ -2944,123 +2492,39 @@ def main_http(args: argparse.Namespace) -> int:
 
     portal_slug = args.portal or _default_portal_slug()
 
-    if args.scrape:
-        days = (
-            [d.strip() for d in args.scrape_days.split(",")]
-            if args.scrape_days
-            else None
-        )
-        locations = (
-            [l.strip() for l in args.scrape_locations.split(",")]
-            if args.scrape_locations
-            else None
-        )
-        print("\n=== Available Classes ===")
-        try:
-            found = scrape_classes_open(
-                portal_slug, args.student_id, days=days, locations=locations
-            )
-        except requests.HTTPError as exc:
-            logger.error("Open API request failed: %s", exc)
-            if exc.response is not None:
-                logger.error("Response: %s", exc.response.text[:500])
-            return 1
-        print(f"CLASSES_JSON:{json.dumps(found)}", flush=True)
-        print(f"\nFound {len(found)} class(es) matching filters.")
-        return 0
-
-    if not args.email or not args.password:
-        logger.error("--email and --password required for HTTP enrollment.")
-        return 1
-
-    client = IClassProAPIClient(args.email, args.password, portal=portal_slug)
-    try:
-        client.login()
-    except Exception as exc:
-        logger.error("Login failed: %s", exc)
-        logger.error(
-            "JWT login is only needed for HTTP enrollment/cart. "
-            "Class discovery uses the public Open API and does not require email/password."
-        )
-        return 1
-
-    if not args.schedule:
-        logger.error("--schedule required for enrollment mode.")
-        return 1
-
-    try:
-        with open(args.schedule) as fh:
-            schedule = json.load(fh)
-    except Exception as exc:
-        logger.error("Could not read schedule %r: %s", args.schedule, exc)
-        return 1
-
-    if not schedule:
-        logger.error("Schedule is empty.")
-        return 1
-
-    effective_complete = args.complete_transaction and not args.dry_run
-    if args.dry_run and args.complete_transaction:
-        logger.info("Dry-run flag enabled; overriding complete-transaction setting.")
-
-    logger.info(
-        "Starting enrollment for %d class(es) [complete_transaction=%s]",
-        len(schedule),
-        effective_complete,
+    days = (
+        [d.strip() for d in args.scrape_days.split(",")]
+        if args.scrape_days
+        else None
     )
-
-    summary, checkout_result = enroll_from_schedule(
-        client,
-        schedule,
-        args.student_id,
-        promo_code=args.promo_code or None,
-        complete_transaction=effective_complete,
+    locations = (
+        [l.strip() for l in args.scrape_locations.split(",")]
+        if args.scrape_locations
+        else None
     )
-
-    print("\n=== Enrollment Run Report ===")
-    success = sum(1 for r in summary if r["status"] == "Success")
-    skipped = sum(1 for r in summary if r["status"] == "Skipped")
-    failed = sum(1 for r in summary if r["status"] == "Failed")
-
-    for r in summary:
-        icon = {"Success": "\u2714", "Skipped": "\u27f3", "Failed": "\u2718"}.get(
-            r["status"], "?"
+    print("\n=== Available Classes ===")
+    try:
+        found = scrape_classes_open(
+            portal_slug, args.student_id, days=days, locations=locations
         )
-        print(f"  {icon} [{r['status']:8s}] {r['label']}")
-        if r.get("details") and r["status"] != "Success":
-            print(f"             {r['details']}")
-
-    if checkout_result is not None:
-        print("\n=== Checkout ===")
-        print(f"  {checkout_result}")
-
-    print(f"\nSummary: {success} added to cart, {skipped} skipped, {failed} failed.")
-    return 0 if failed == 0 else 1
-
-
-def _default_cli_driver() -> str:
-    v = (os.getenv("ICLASS_DRIVER") or "playwright").strip().lower()
-    return "api" if v == "api" else "playwright"
+    except requests.HTTPError as exc:
+        logger.error("Open API request failed: %s", exc)
+        if exc.response is not None:
+            logger.error("Response: %s", exc.response.text[:500])
+        return 1
+    print(f"CLASSES_JSON:{json.dumps(found)}", flush=True)
+    print(f"\nFound {len(found)} class(es) matching filters.")
+    return 0
 
 
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description="iClassPro Enrollment Bot")
     parser.add_argument(
-        "--driver",
-        type=str,
-        choices=["playwright", "api"],
-        default=_default_cli_driver(),
-        help=(
-            "playwright: browser automation (default). "
-            "api: HTTP — Open API discovery + JWT enrollment."
-        ),
-    )
-    parser.add_argument(
         "--portal",
         type=str,
         default=os.getenv("ICLASS_PORTAL"),
-        help="Org slug for HTTP driver (JWT/Open API); optional if ICLASS_BASE_URL is set.",
+        help="Org slug for Open API discovery (--scrape); optional if ICLASS_BASE_URL is set.",
     )
     parser.add_argument(
         "--base-url",
@@ -3072,7 +2536,7 @@ def main():
         "--scrape",
         action="store_true",
         default=False,
-        help="Scrape available classes and print as JSON instead of enrolling.",
+        help="Discover classes via the public Open API and print JSON (no browser).",
     )
     parser.add_argument(
         "--scrape-days",
@@ -3091,12 +2555,6 @@ def main():
             "Comma-separated list of locations to include during scrape "
             "(e.g. 'Culver,El Segundo').  Empty means all locations."
         ),
-    )
-    parser.add_argument(
-        "--deep-scrape",
-        action="store_true",
-        default=False,
-        help="Extract detailed URLs and instructor info for each discovered class (slower).",
     )
     parser.add_argument(
         "--schedule",
@@ -3170,8 +2628,8 @@ def main():
         help="Path to persist Playwright session state across runs.",
     )
     args = parser.parse_args()
-    if args.driver == "api":
-        sys.exit(main_http(args))
+    if args.scrape:
+        sys.exit(open_api_discovery_cli(args))
 
     # --- Setup Logging ---
     log_file = "iclasspro.log"
@@ -3204,9 +2662,7 @@ def main():
     logger.info(f"Password: {'*' * len(args.password) if args.password else 'Not set'}")
     logger.info(f"Student ID: {args.student_id}")
     logger.info(f"Deep debug enabled: {bool(args.deep_debug)}")
-    logger.info(
-        f"Send email enabled (effective): {bool(args.send_email and not args.scrape)}"
-    )
+    logger.info(f"Send email enabled (effective): {bool(args.send_email)}")
     logger.info(
         "Class detail readiness timeout (ms): "
         f"{os.getenv('ICLASS_CLASS_DETAIL_TIMEOUT_MS', '45000')}"
@@ -3223,110 +2679,90 @@ def main():
     run_started_at = datetime.now(timezone.utc).isoformat()
 
     try:
-        if args.scrape:
-            # --- Scrape mode: discover available classes and emit JSON ---
-            logger.info("Mode: scrape available classes")
-            days_filter = [d.strip() for d in args.scrape_days.split(",") if d.strip()]
-            locations_filter = [
-                l.strip() for l in args.scrape_locations.split(",") if l.strip()
-            ]
-            driver.webdriver()
-            driver.login(email=args.email, password=args.password)
-            classes = driver.scrape_classes(
-                student_id=args.student_id,
-                days_filter=days_filter or None,
-                locations_filter=locations_filter or None,
-                deep_scrape=args.deep_scrape,
+        # --- Enrollment mode (Playwright browser) ---
+        schedule_path = args.schedule
+        logger.info(f"Mode: enrollment, schedule: {schedule_path}")
+        with open(schedule_path, "r") as f:
+            schedule = json.load(f)
+
+        if schedule:
+            logger.info(
+                f"Schedule to process:\n{pd.DataFrame(schedule).drop(columns=['url', 'name', 'rowId'], errors='ignore').to_string(index=False)}"
             )
-            # Emit a single parseable line that the web UI will detect
-            print(f"CLASSES_JSON:{json.dumps(classes)}", flush=True)
-            logger.info("All operations completed.")
 
-        else:
-            # --- Enrollment mode ---
-            schedule_path = args.schedule
-            logger.info(f"Mode: enrollment, schedule: {schedule_path}")
-            with open(schedule_path, "r") as f:
-                schedule = json.load(f)
+        driver.webdriver()
+        driver.login(email=args.email, password=args.password)
 
-            if schedule:
-                logger.info(
-                    f"Schedule to process:\n{pd.DataFrame(schedule).drop(columns=['url', 'name', 'rowId'], errors='ignore').to_string(index=False)}"
-                )
-
-            driver.webdriver()
-            driver.login(email=args.email, password=args.password)
-
-            for i, class_info in enumerate(schedule):
-                log_info = {
-                    k: v
-                    for k, v in class_info.items()
-                    if k not in ("url", "name", "rowId")
-                }
-                class_started_at = datetime.now(timezone.utc).isoformat()
-                logger.info(
-                    f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
-                )
-                used_path = "auto"
-                try:
-                    class_url = str(class_info.get("url") or "").strip()
-                    driver.enroll(
-                        location=class_info.get("Location")
-                        or class_info.get("location", ""),
-                        timestr=class_info.get("Time") or class_info.get("time", ""),
-                        daystr=class_info.get("Day") or class_info.get("day", ""),
-                        student_id=args.student_id,
-                        class_index=i,
-                        class_url=class_url,
-                    )
-                    summary_data.append(
-                        {
-                            "class": class_info,
-                            "status": "Success",
-                            "error": "",
-                            "path": used_path,
-                            "started_at": class_started_at,
-                            "finished_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                except EnrollmentSkipped as skip:
-                    logger.info(f"Skipping class {class_info.get('name', '')}: {skip}")
-                    summary_data.append(
-                        {
-                            "class": class_info,
-                            "status": "Skipped",
-                            "error": str(skip),
-                            "path": used_path,
-                            "started_at": class_started_at,
-                            "finished_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to enroll in class {class_info}: {e}")
-                    summary_data.append(
-                        {
-                            "class": class_info,
-                            "status": "Failed",
-                            "error": str(e),
-                            "path": used_path,
-                            "started_at": class_started_at,
-                            "finished_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    )
-                    driver.take_screenshot(f"error_class_{i}.png")
-
-            effective_complete_transaction = (
-                args.complete_transaction and not args.dry_run
+        for i, class_info in enumerate(schedule):
+            log_info = {
+                k: v
+                for k, v in class_info.items()
+                if k not in ("url", "name", "rowId")
+            }
+            class_started_at = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                f"--- Processing class {i+1}/{len(schedule)}: \n{json.dumps(log_info, indent=4)} ---"
             )
-            if args.dry_run and args.complete_transaction:
-                logger.info(
-                    "Dry-run flag enabled; overriding complete-transaction setting."
+            used_path = "auto"
+            try:
+                class_url = str(class_info.get("url") or "").strip()
+                driver.enroll(
+                    location=class_info.get("Location")
+                    or class_info.get("location", ""),
+                    timestr=class_info.get("Time") or class_info.get("time", ""),
+                    daystr=class_info.get("Day") or class_info.get("day", ""),
+                    student_id=args.student_id,
+                    class_index=i,
+                    class_url=class_url,
                 )
-            driver.process_cart(
-                promo_code=args.promo_code,
-                complete_transaction=effective_complete_transaction,
+                summary_data.append(
+                    {
+                        "class": class_info,
+                        "status": "Success",
+                        "error": "",
+                        "path": used_path,
+                        "started_at": class_started_at,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            except EnrollmentSkipped as skip:
+                logger.info(f"Skipping class {class_info.get('name', '')}: {skip}")
+                summary_data.append(
+                    {
+                        "class": class_info,
+                        "status": "Skipped",
+                        "error": str(skip),
+                        "path": used_path,
+                        "started_at": class_started_at,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to enroll in class {class_info}: {e}")
+                summary_data.append(
+                    {
+                        "class": class_info,
+                        "status": "Failed",
+                        "error": str(e),
+                        "path": used_path,
+                        "started_at": class_started_at,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                driver.take_screenshot(f"error_class_{i}.png")
+
+        effective_complete_transaction = (
+            args.complete_transaction and not args.dry_run
+        )
+        if args.dry_run and args.complete_transaction:
+            logger.info(
+                "Dry-run flag enabled; overriding complete-transaction setting."
             )
-            logger.info("All operations completed.")
+        driver.process_cart(
+            promo_code=args.promo_code,
+            complete_transaction=effective_complete_transaction,
+        )
+        logger.info("All operations completed.")
 
     except Exception as e:
         logger.critical(f"A critical error occurred: {e}")
@@ -3335,7 +2771,7 @@ def main():
         driver.close()
 
         try:
-            mode = "scrape" if args.scrape else "enrollment"
+            mode = "enrollment"
             counts = {
                 "total": len(summary_data),
                 "success": sum(1 for r in summary_data if r.get("status") == "Success"),
@@ -3361,7 +2797,7 @@ def main():
         except Exception as report_err:
             logger.warning(f"Failed to write run report: {report_err}")
 
-        if args.send_email and not args.scrape:
+        if args.send_email:
             logger.info("Email sending is enabled. Checking credentials...")
             to_addr = args.email
             from_addr = args.email

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 import yaml
 from dotenv import load_dotenv, set_key, dotenv_values
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,10 +19,6 @@ class ScheduleSaveRequest(BaseModel):
     schedule: List[Dict[str, str]]
 
 
-class UpdateEnvRequest(BaseModel):
-    filename: str
-
-
 class SaveConfigRequest(BaseModel):
     email: str
     password: str
@@ -31,8 +27,6 @@ class SaveConfigRequest(BaseModel):
     complete_transaction: bool
     send_email: bool
     deep_debug: bool
-    discovery_driver: str = "playwright"
-    enrollment_driver: str = "playwright"
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,56 +36,9 @@ DOTENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(DOTENV_PATH, override=True)
 
 
-def _normalize_driver(value: Optional[str]) -> str:
-    """Return ``api`` or ``playwright``."""
-    if not value:
-        return "playwright"
-    v = str(value).strip().lower()
-    return "api" if v == "api" else "playwright"
-
-
-def _discovery_driver_resolve(websocket_value: Optional[str] = None) -> str:
-    """Discovery/scrape driver: optional WebSocket override, then env chain."""
-    if websocket_value is not None and str(websocket_value).strip() != "":
-        return _normalize_driver(websocket_value)
-    override = _get_config_value("ICLASS_DISCOVERY_DRIVER", "").strip()
-    if override:
-        return _normalize_driver(override)
-    return _normalize_driver(_get_config_value("ICLASS_DRIVER", "playwright"))
-
-
-def _enrollment_driver_resolve(websocket_value: Optional[str] = None) -> str:
-    """Enrollment driver: optional WebSocket override, then env / legacy flags.
-
-    JWT confidence (informal): we do not have official iClassPro docs. Empirically
-    ``POST /api/jwt/v1/login`` often returns HTTP 500 for customer accounts with
-    valid browser credentials; causes may include server-side handling, account
-    type, or missing prerequisites. Treat HTTP enrollment as best-effort.
-
-    Default enrollment remains **playwright** unless the UI, ``ICLASS_ENROLLMENT_DRIVER``,
-    or legacy ``ICLASS_ENROLLMENT_API=1`` (with ``ICLASS_DRIVER=api``) opts in.
-    """
-    if websocket_value is not None and str(websocket_value).strip() != "":
-        return _normalize_driver(websocket_value)
-    override = _get_config_value("ICLASS_ENROLLMENT_DRIVER", "").strip()
-    if override:
-        return _normalize_driver(override)
-    if _get_config_value(
-        "ICLASS_DRIVER", ""
-    ).strip().lower() == "api" and _get_config_value(
-        "ICLASS_ENROLLMENT_API", "0"
-    ).strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
-        return "api"
-    return "playwright"
-
-
-def _iclasspro_cmd(driver: str) -> list:
-    """Single driver module: ``iclasspro.py --driver api|playwright``."""
-    return ["iclasspro.py", "--driver", _normalize_driver(driver)]
+def _iclasspro_script() -> str:
+    """Path to ``iclasspro.py`` next to this app."""
+    return os.path.join(BASE_DIR, "iclasspro.py")
 
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
@@ -155,24 +102,7 @@ async def get(request: Request):
         "initial_schedule": [],
         "default_schedule_filename": None,
         "locations": _load_locations(),
-        "discovery_driver": _discovery_driver_resolve(),
-        "enrollment_driver": _enrollment_driver_resolve(),
     }
-
-    # Try to load the default schedule from .env to pre-populate the grid
-    default_schedule_env = _get_config_value("ICLASS_SCHEDULE", "")
-    if default_schedule_env:
-        default_schedule_path = os.path.normpath(default_schedule_env)
-        if os.path.exists(default_schedule_path):
-            try:
-                with open(default_schedule_path, "r") as f:
-                    context["initial_schedule"] = json.load(f)
-                context["default_schedule_filename"] = os.path.basename(
-                    default_schedule_path
-                )
-            except Exception:
-                context["initial_schedule"] = []
-                context["default_schedule_filename"] = None
 
     schedules_list = []
     schedules_dir = "schedules"
@@ -180,24 +110,21 @@ async def get(request: Request):
         for f in os.listdir(schedules_dir):
             if f.endswith(".json") and os.path.isfile(os.path.join(schedules_dir, f)):
                 schedules_list.append(f)
+    schedules_list.sort()
     context["schedules_list"] = schedules_list
 
+    # Pre-fill grid from the first schedule alphabetically (implicit default).
+    if schedules_list:
+        first_path = os.path.join(schedules_dir, schedules_list[0])
+        try:
+            with open(first_path, "r") as f:
+                context["initial_schedule"] = json.load(f)
+            context["default_schedule_filename"] = schedules_list[0]
+        except Exception:
+            context["initial_schedule"] = []
+            context["default_schedule_filename"] = None
+
     return templates.TemplateResponse("index.html", context)
-
-
-@app.post("/api/update-default-schedule")
-async def update_default_schedule(request: UpdateEnvRequest):
-    if not os.path.exists(DOTENV_PATH):
-        with open(DOTENV_PATH, "w") as f:
-            pass
-
-    schedule_path = os.path.join("schedules", request.filename)
-    if not os.path.exists(schedule_path):
-        raise HTTPException(status_code=404, detail="Schedule file not found")
-
-    set_key(DOTENV_PATH, "ICLASS_SCHEDULE", schedule_path)
-    os.environ["ICLASS_SCHEDULE"] = schedule_path
-    return {"message": f"Default schedule updated to {request.filename}"}
 
 
 @app.post("/api/save-config")
@@ -217,10 +144,6 @@ async def save_config(request: SaveConfigRequest):
     )
     set_key(DOTENV_PATH, "ICLASS_SEND_EMAIL", "1" if request.send_email else "0")
     set_key(DOTENV_PATH, "ICLASS_DEEP_DEBUG", "1" if request.deep_debug else "0")
-    dd = _normalize_driver(request.discovery_driver)
-    ed = _normalize_driver(request.enrollment_driver)
-    set_key(DOTENV_PATH, "ICLASS_DISCOVERY_DRIVER", dd)
-    set_key(DOTENV_PATH, "ICLASS_ENROLLMENT_DRIVER", ed)
     os.environ["ICLASS_EMAIL"] = request.email
     os.environ["ICLASS_PASSWORD"] = request.password
     os.environ["ICLASS_STUDENT_ID"] = request.student_id
@@ -230,8 +153,6 @@ async def save_config(request: SaveConfigRequest):
     )
     os.environ["ICLASS_SEND_EMAIL"] = "1" if request.send_email else "0"
     os.environ["ICLASS_DEEP_DEBUG"] = "1" if request.deep_debug else "0"
-    os.environ["ICLASS_DISCOVERY_DRIVER"] = dd
-    os.environ["ICLASS_ENROLLMENT_DRIVER"] = ed
     return {"message": "Configuration saved"}
 
 
@@ -243,6 +164,7 @@ async def list_schedules():
         for f in os.listdir(schedules_dir):
             if f.endswith(".json") and os.path.isfile(os.path.join(schedules_dir, f)):
                 schedules.append(f)
+    schedules.sort()
     return schedules
 
 
@@ -284,10 +206,8 @@ async def websocket_scrape(websocket: WebSocket):
         student_id = config.get("student_id", "")
         scrape_days = config.get("scrape_days", "")
         scrape_locations = config.get("scrape_locations", "")
-        deep_scrape = _as_bool(config.get("deep_scrape", False))
         deep_debug = _as_bool(config.get("deep_debug", False))
         send_email = _as_bool(config.get("send_email", False))
-        discovery_driver = _discovery_driver_resolve(config.get("discovery_driver"))
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -298,21 +218,20 @@ async def websocket_scrape(websocket: WebSocket):
 
         await websocket.send_text("Starting class discovery scrape...")
 
-        cmd_args = _iclasspro_cmd(discovery_driver) + [
+        cmd_args = [
+            _iclasspro_script(),
+            "--scrape",
             "--email",
             email,
             "--password",
             password,
             "--student-id",
             str(student_id),
-            "--scrape",
         ]
         if scrape_days:
             cmd_args.extend(["--scrape-days", scrape_days])
         if scrape_locations:
             cmd_args.extend(["--scrape-locations", scrape_locations])
-        if deep_scrape:
-            cmd_args.append("--deep-scrape")
         if deep_debug:
             cmd_args.append("--deep-debug")
 
@@ -321,8 +240,6 @@ async def websocket_scrape(websocket: WebSocket):
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
         # Ensure runtime honors current UI toggle values, not stale env defaults.
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "0"
-        child_env["ICLASS_DISCOVERY_DRIVER"] = discovery_driver
-        child_env["ICLASS_ENROLLMENT_DRIVER"] = _enrollment_driver_resolve()
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -390,7 +307,6 @@ async def websocket_enroll_selected(websocket: WebSocket):
         send_email = _as_bool(config.get("send_email", False))
         deep_debug = _as_bool(config.get("deep_debug", False))
         selected_classes = config.get("selected_classes", [])
-        enrollment_driver = _enrollment_driver_resolve(config.get("enrollment_driver"))
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -411,7 +327,8 @@ async def websocket_enroll_selected(websocket: WebSocket):
 
         await websocket.send_text("Starting enrollment of selected classes...")
 
-        cmd_args = _iclasspro_cmd(enrollment_driver) + [
+        cmd_args = [
+            _iclasspro_script(),
             "--email",
             email,
             "--password",
@@ -436,8 +353,6 @@ async def websocket_enroll_selected(websocket: WebSocket):
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
-        child_env["ICLASS_ENROLLMENT_DRIVER"] = enrollment_driver
-        child_env["ICLASS_DISCOVERY_DRIVER"] = _discovery_driver_resolve()
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -517,7 +432,6 @@ async def websocket_endpoint(websocket: WebSocket):
         send_email = _as_bool(config.get("send_email", False))
         deep_debug = _as_bool(config.get("deep_debug", False))
         schedule = config.get("schedule", [])
-        enrollment_driver = _enrollment_driver_resolve(config.get("enrollment_driver"))
 
         if not all([email, password, student_id]):
             await websocket.send_text(
@@ -542,7 +456,8 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text("Starting iClassPro automation...")
 
         # Build the command arguments
-        cmd_args = _iclasspro_cmd(enrollment_driver) + [
+        cmd_args = [
+            _iclasspro_script(),
             "--email",
             email,
             "--password",
@@ -567,8 +482,6 @@ async def websocket_endpoint(websocket: WebSocket):
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
-        child_env["ICLASS_ENROLLMENT_DRIVER"] = enrollment_driver
-        child_env["ICLASS_DISCOVERY_DRIVER"] = _discovery_driver_resolve()
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,

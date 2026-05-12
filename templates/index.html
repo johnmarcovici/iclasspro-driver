@@ -208,17 +208,30 @@
         .status-error { color: #dc3545; font-weight: bold;}
 
         /* Schedule editor */
+        #schedule-container {
+            width: 100%;
+        }
         .schedule-row {
             display: flex;
             gap: 0.75rem;
             align-items: center;
             margin-bottom: 0.4rem;
+            width: 100%;
+            box-sizing: border-box;
         }
         .schedule-row select, .schedule-row input {
             margin-bottom: 0;
             width: 100%;
+            box-sizing: border-box;
         }
-        .schedule-row .day-input { flex: 1; }
+        .schedule-row .day-input {
+            flex: 1 1 0;
+            min-width: 0;
+        }
+        .schedule-field-grow {
+            flex: 1 1 0;
+            min-width: 0;
+        }
         .delete-btn {
             width: auto;
             margin-bottom: 0;
@@ -250,41 +263,75 @@
 
         .clear-btn:hover { background-color: #dc3545 !important; color: white !important; }
 
-        /* Saved schedules list */
-        .schedules-list { list-style: none; padding: 0; margin: 0.5rem 0 0 0; }
-        .schedules-list li {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.3rem 0.4rem;
-            border-radius: 4px;
-        }
-        .schedules-list li:hover { background: rgba(0,0,0,0.04); }
-        .schedules-list li.is-default { background: rgba(255, 193, 7, 0.12); }
-        .schedules-list li button {
-            background: none;
-            border: none;
-            padding: 0;
-            margin: 0;
-            width: auto;
-        }
-        .schedules-list li .name-btn {
-            flex: 1;
-            text-align: left;
-            color: var(--color);
-            cursor: pointer;
+        /* Manual tab: schedule file + save-as */
+        .schedule-picker-label {
+            display: block;
+            margin-top: 0;
+            margin-bottom: 0;
             font-size: 0.9rem;
         }
-        .schedules-list li .name-btn:hover { color: var(--primary); }
-        .schedules-list li .star-btn {
-            color: #c0c0c0;
-            cursor: pointer;
-            font-size: 1rem;
-            line-height: 1;
+        .manual-schedule-file-row {
+            margin-bottom: 0.75rem;
         }
-        .schedules-list li.is-default .star-btn { color: #ffc107; }
-        .schedules-list li .star-btn:hover { color: #ffc107; }
-
+        .manual-schedule-file-row #schedule-picker {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #schedule-picker {
+            margin-top: 0.25rem;
+            padding: 0.35rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid var(--muted-border-color);
+            color: inherit;
+            font: inherit;
+            background: transparent;
+        }
+        .manual-save-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: flex-end;
+            margin-top: 1rem;
+        }
+        .manual-save-toolbar label {
+            flex: 1 1 100%;
+            max-width: 100%;
+            margin-bottom: 0;
+        }
+        .manual-save-toolbar .save-as-field {
+            display: flex;
+            gap: 0.5rem;
+            align-items: stretch;
+            width: 100%;
+            margin-top: 0.25rem;
+        }
+        .manual-save-toolbar #schedule-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: auto;
+            margin-bottom: 0;
+            box-sizing: border-box;
+        }
+        .manual-save-toolbar .save-schedule-btn {
+            flex: 0 0 7rem;
+            margin-bottom: 0;
+            box-sizing: border-box;
+        }
+        .manual-schedule-actions {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: stretch;
+            margin-top: 1rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .manual-schedule-actions button {
+            flex: 1 1 12rem;
+            min-width: 0;
+            margin-bottom: 0;
+        }
         /* Discovery results table */
         #discovered-classes-table {
             width: 100%;
@@ -343,7 +390,7 @@
         title="Toggle run output panel"
     >▾</button>
     <div class="app-shell">
-        <!-- ===== Sidebar: Configuration + Saved Schedules ===== -->
+        <!-- ===== Sidebar: Configuration ===== -->
         <aside class="sidebar">
             <details open>
                 <summary>Configuration</summary>
@@ -387,32 +434,7 @@
                     <small style="color: var(--muted-color); font-size: 0.8rem;">
                         Use deep debugging only when troubleshooting failures; it writes extra DOM/screenshot/debug files.
                     </small>
-                    <label>
-                        Class discovery
-                        <select id="discovery_driver" style="width:100%; margin-top:0.25rem;">
-                            <option value="api" {% if discovery_driver == 'api' %}selected{% endif %}>HTTP API (fast, Open API catalog)</option>
-                            <option value="playwright" {% if discovery_driver == 'playwright' %}selected{% endif %}>Playwright (browser)</option>
-                        </select>
-                    </label>
-                    <label>
-                        Enrollment
-                        <select id="enrollment_driver" style="width:100%; margin-top:0.25rem;">
-                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — recommended)</option>
-                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT login — may fail for some accounts)</option>
-                        </select>
-                    </label>
-                    <small style="color: var(--muted-color); font-size: 0.8rem;">
-                        Choices are saved with your configuration. Enrollment defaults to the browser driver unless you pick HTTP API here or in <code>.env</code>.
-                    </small>
                 </div>
-            </details>
-
-            <details open>
-                <summary>Saved Schedules</summary>
-                <ul id="schedules-list" class="schedules-list"></ul>
-                <small style="color: var(--muted-color); font-size: 0.8rem; display: block; margin-top: 0.5rem;">
-                    Click a name to load it. Click the star to set it as the default schedule.
-                </small>
             </details>
         </aside>
         <div id="sidebar-splitter" class="splitter splitter-col" role="separator" aria-label="Resize sidebar" aria-orientation="vertical"></div>
@@ -436,23 +458,33 @@
                     <details open>
                         <summary><strong>Class Schedule</strong></summary>
 
-                        <div class="grid" style="margin-bottom: 1rem; align-items: end;">
-                            <label>
-                                Save Schedule
-                                <div style="display: flex; gap: 0.5rem;">
-                                    <input type="text" id="schedule-name" placeholder="my_schedule.json" style="margin-bottom: 0;">
-                                    <button class="secondary" onclick="saveSchedule()" style="width: auto; margin-bottom: 0;">Save</button>
-                                </div>
+                        <div class="manual-schedule-file-row">
+                            <label class="schedule-picker-label">
+                                Schedule file
+                                <select id="schedule-picker" aria-label="Choose a saved schedule JSON file"></select>
                             </label>
                         </div>
 
                         <div id="schedule-container">
                             <!-- Schedule rows will be injected here -->
                         </div>
-                        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
-                            <button class="secondary" onclick="addScheduleRow()" style="margin-bottom: 0;">+ Add another class</button>
-                            <button class="secondary outline clear-btn" onclick="clearSchedule()" style="margin-bottom: 0; border-color: #dc3545; color: #dc3545;">Clear All</button>
+                        <div class="manual-schedule-actions">
+                            <button type="button" class="secondary" onclick="addScheduleRow()">+ Add another class</button>
+                            <button type="button" class="secondary outline clear-btn" onclick="clearSchedule()" style="border-color: #dc3545; color: #dc3545;">Clear All</button>
                         </div>
+
+                        <div class="manual-save-toolbar">
+                            <label>
+                                Save as
+                                <div class="save-as-field">
+                                    <input type="text" id="schedule-name" placeholder="my_schedule.json">
+                                    <button type="button" class="secondary save-schedule-btn" onclick="saveSchedule()">Save</button>
+                                </div>
+                            </label>
+                        </div>
+                        <small style="color: var(--muted-color); font-size: 0.8rem; display: block; margin-top: 0.5rem;">
+                            Saves the current class rows to <code>schedules/</code> using the filename above.
+                        </small>
                     </details>
 
                     <section style="margin-top: 1.5rem;">
@@ -489,10 +521,6 @@
                     </details>
 
                     <section style="margin-top: 1rem;">
-                        <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
-                            <input type="checkbox" id="deep-scrape-cb" style="width:1.2rem; height:1.2rem; margin:0; cursor:pointer;" {% if discovery_driver == 'api' %}disabled{% endif %}>
-                            <span id="deep-scrape-label-primary">{% if discovery_driver == 'api' %}Detailed links &amp; instructor info {% else %}Get detailed links &amp; instructor info {% endif %}</span><span id="deep-scrape-label-hint" style="font-weight:normal;font-size:0.85em;color:#888;">{% if discovery_driver == 'api' %}(always included with HTTP discovery){% else %}(slower){% endif %}</span>
-                        </label>
                         <button id="discover-button" onclick="startDiscovery()" style="margin-bottom:0; width: auto;">🔍 Discover Available Classes</button>
                     </section>
 
@@ -578,7 +606,7 @@
 
     <script>
         const initialSchedule = {{ initial_schedule | tojson | safe }};
-        const initialSchedulesList = {{ schedules_list | tojson | safe }};
+        let schedulesList = {{ schedules_list | tojson | safe }};
         const initialDefaultScheduleFilename = "{{ default_schedule_filename or '' }}";
         const terminal = document.getElementById("terminal");
         const statusIndicator = document.getElementById("status-indicator");
@@ -589,7 +617,6 @@
 
         let rowCount = 0;
         let currentScheduleFilename = initialDefaultScheduleFilename;
-        let defaultScheduleFilename = initialDefaultScheduleFilename;
 
         // ----- Active workflow tracking (drives the shared Stop button) -----
         // kind: "manual" | "discover" | "enroll-selected" | null
@@ -621,8 +648,16 @@
             applyRunPanelCollapsedState(
                 localStorage.getItem(uiStorageKeys.runPanelCollapsed) === '1'
             );
-            renderSidebarSchedulesList();
+            renderSchedulePicker();
             setupConfigAutosave();
+
+            const schedulePicker = document.getElementById('schedule-picker');
+            if (schedulePicker) {
+                schedulePicker.addEventListener('change', function() {
+                    const f = schedulePicker.value;
+                    if (f) loadScheduleByName(f);
+                });
+            }
 
             if (initialSchedule && initialSchedule.length > 0) {
                 initialSchedule.forEach(cls => {
@@ -749,65 +784,43 @@
             passwordInput.type = passwordInput.type === "password" ? "text" : "password";
         }
 
-        // ===== Sidebar: saved schedules =====
-        function renderSidebarSchedulesList() {
-            const ul = document.getElementById('schedules-list');
-            ul.innerHTML = '';
-            if (!initialSchedulesList || initialSchedulesList.length === 0) {
-                const li = document.createElement('li');
-                li.innerHTML = '<small style="color: var(--muted-color);">No saved schedules yet.</small>';
-                ul.appendChild(li);
+        // ===== Manual tab: schedule file picker (first A–Z is implicit default) =====
+        function renderSchedulePicker() {
+            const sel = document.getElementById('schedule-picker');
+            if (!sel) return;
+
+            sel.innerHTML = '';
+            const sorted = (schedulesList || []).slice().sort(function(a, b) {
+                return String(a).localeCompare(String(b), undefined, { sensitivity: 'base' });
+            });
+
+            if (sorted.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No saved schedules yet';
+                opt.disabled = true;
+                sel.appendChild(opt);
                 return;
             }
-            initialSchedulesList.forEach(function(filename) {
-                const li = document.createElement('li');
-                if (filename === defaultScheduleFilename) li.classList.add('is-default');
-                li.dataset.filename = filename;
 
-                const star = document.createElement('button');
-                star.className = 'star-btn';
-                star.title = 'Set as default';
-                star.innerText = filename === defaultScheduleFilename ? '★' : '☆';
-                star.onclick = function(ev) {
-                    ev.stopPropagation();
-                    setDefaultSchedule(filename);
-                };
-
-                const nameBtn = document.createElement('button');
-                nameBtn.className = 'name-btn';
-                nameBtn.innerText = filename;
-                nameBtn.title = 'Load schedule';
-                nameBtn.onclick = function() { loadScheduleByName(filename); };
-
-                li.appendChild(star);
-                li.appendChild(nameBtn);
-                ul.appendChild(li);
+            sorted.forEach(function(filename) {
+                const opt = document.createElement('option');
+                opt.value = filename;
+                opt.textContent = filename;
+                sel.appendChild(opt);
             });
-        }
 
-        async function setDefaultSchedule(filename) {
-            try {
-                const resp = await fetch('/api/update-default-schedule', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename })
-                });
-                if (!resp.ok) {
-                    alert('Failed to set default schedule.');
-                    return;
-                }
-                defaultScheduleFilename = filename;
-                renderSidebarSchedulesList();
-            } catch (err) {
-                console.error('Failed to set default schedule:', err);
-                alert('Failed to set default schedule.');
+            if (currentScheduleFilename && sorted.includes(currentScheduleFilename)) {
+                sel.value = currentScheduleFilename;
+            } else {
+                sel.value = sorted[0];
+                currentScheduleFilename = sorted[0];
             }
         }
 
         // ===== Manual schedule editor =====
         async function loadScheduleByName(filename) {
             currentScheduleFilename = filename;
-            switchTab('manual', document.getElementById('tab-btn-manual'));
             try {
                 const response = await fetch(`/api/schedules/${filename}`);
                 if (!response.ok) {
@@ -823,6 +836,8 @@
                     addScheduleRow();
                 }
                 document.getElementById('schedule-name').value = filename;
+                const sp = document.getElementById('schedule-picker');
+                if (sp) sp.value = filename;
             } catch (error) {
                 console.error("Error loading schedule:", error);
                 alert("Error loading schedule");
@@ -851,7 +866,14 @@
                     body: JSON.stringify({ filename: filename, schedule: payload })
                 });
                 if (response.ok) {
-                    alert("Schedule saved successfully! Reload the page to see it in the sidebar.");
+                    if (!schedulesList.includes(filename)) {
+                        schedulesList.push(filename);
+                    }
+                    currentScheduleFilename = filename;
+                    renderSchedulePicker();
+                    const sp = document.getElementById('schedule-picker');
+                    if (sp) sp.value = filename;
+                    alert("Schedule saved successfully!");
                 } else {
                     alert("Failed to save schedule.");
                 }
@@ -911,11 +933,11 @@
                 <select class="day-input">
                     ${dayOptions}
                 </select>
-                <div style="flex:1;">
+                <div class="schedule-field-grow">
                     ${locSelectHtml}
                     ${locInputHtml}
                 </div>
-                <div style="flex:1;">
+                <div class="schedule-field-grow">
                     ${timeSelectHtml}
                     ${timeInputHtml}
                 </div>
@@ -1042,25 +1064,6 @@
             }
         }
 
-        /** Keep deep-scrape checkbox in sync when discovery driver changes (API ignores --deep-scrape). */
-        function syncDeepScrapeUi() {
-            const sel = document.getElementById('discovery_driver');
-            const cb = document.getElementById('deep-scrape-cb');
-            const primary = document.getElementById('deep-scrape-label-primary');
-            const hint = document.getElementById('deep-scrape-label-hint');
-            if (!sel || !cb || !primary || !hint) return;
-            const api = sel.value === 'api';
-            cb.disabled = api;
-            if (api) {
-                cb.checked = false;
-                primary.textContent = 'Detailed links & instructor info ';
-                hint.textContent = '(always included with HTTP discovery)';
-            } else {
-                primary.textContent = 'Get detailed links & instructor info ';
-                hint.textContent = '(slower)';
-            }
-        }
-
         function saveConfigToEnv() {
             return fetch('/api/save-config', {
                 method: 'POST',
@@ -1072,9 +1075,7 @@
                     promo_code: document.getElementById('promo_code').value,
                     complete_transaction: document.getElementById('complete_transaction').checked,
                     send_email: document.getElementById('send_email').checked,
-                    deep_debug: document.getElementById('deep_debug').checked,
-                    discovery_driver: document.getElementById('discovery_driver').value,
-                    enrollment_driver: document.getElementById('enrollment_driver').value
+                    deep_debug: document.getElementById('deep_debug').checked
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
         }
@@ -1117,16 +1118,6 @@
                     saveConfigToEnv();
                 });
             });
-
-            ['discovery_driver', 'enrollment_driver'].forEach(function(id) {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('change', function() {
-                    if (id === 'discovery_driver') syncDeepScrapeUi();
-                    saveConfigToEnv();
-                });
-            });
-
-            syncDeepScrapeUi();
         }
 
         // ===== Manual: run schedule =====
@@ -1146,20 +1137,6 @@
             const schedulePayload = schedule.map(({ Location, Day, Time }) => ({ Location, Day, Time }));
 
             saveConfigToEnv();
-
-            if (currentScheduleFilename) {
-                try {
-                    await fetch('/api/update-default-schedule', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ filename: currentScheduleFilename })
-                    });
-                    defaultScheduleFilename = currentScheduleFilename;
-                    renderSidebarSchedulesList();
-                } catch (error) {
-                    console.error("Could not update default schedule in .env:", error);
-                }
-            }
 
             if (!email || !password || !student_id) {
                 alert("Please fill in all credentials in the Configuration sidebar.");
@@ -1185,7 +1162,6 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
-                    enrollment_driver: document.getElementById('enrollment_driver').value,
                     schedule: schedulePayload
                 }));
             };
@@ -1290,7 +1266,6 @@
             const checkedLocs = Array.from(document.querySelectorAll('.scrape-loc-cb:checked')).map(cb => cb.value);
             const scrape_days = checkedDays.join(',');
             const scrape_locations = checkedLocs.join(',');
-            const deep_scrape = document.getElementById('deep-scrape-cb').checked;
             const deep_debug = document.getElementById('deep_debug').checked;
 
             discoveredClasses = [];
@@ -1309,8 +1284,7 @@
             activeWs.onopen = function() {
                 activeWs.send(JSON.stringify({
                     email, password, student_id, scrape_days, scrape_locations,
-                    deep_scrape, deep_debug,
-                    discovery_driver: document.getElementById('discovery_driver').value
+                    deep_debug
                 }));
             };
 
@@ -1459,7 +1433,6 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
-                    enrollment_driver: document.getElementById('enrollment_driver').value,
                     selected_classes: selected
                 }));
             };

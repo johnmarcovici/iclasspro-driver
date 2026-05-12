@@ -74,18 +74,16 @@ The dashboard is a thin wrapper around `iclasspro.py`, which can also be run dir
 python3 iclasspro.py --help
 ```
 
-Use **`--driver playwright`** (default) or **`--driver api`** for the HTTP/Open API + JWT path; default can be set with `ICLASS_DRIVER`. Older scripts that call **`iclasspro_api.py`** still work: that script is a thin wrapper that runs `iclasspro.py --driver api`.
+Class discovery uses the **public Open API** (`--scrape`). Enrollment uses **Playwright** (browser automation). Older scripts that call **`iclasspro_api.py`** forward to `iclasspro.py` with the same arguments.
 
 Key flags at a glance:
 
 | Flag | Description |
 |---|---|
-| `--driver` | `playwright` (browser) or `api` (HTTP/JWT); overrides `ICLASS_DRIVER` |
-| `--schedule` | Path to a schedule JSON file |
-| `--scrape` | Discover available classes instead of enrolling |
+| `--schedule` | Path to a schedule JSON file (enrollment) |
+| `--scrape` | Discover classes via Open API and print JSON (no browser login) |
 | `--scrape-days` | Comma-separated days to filter discovery (e.g. `Monday,Wednesday`) |
 | `--scrape-locations` | Comma-separated locations to filter discovery |
-| `--deep-scrape` | Fetch richer class details during discovery (slower) |
 | `--complete-transaction` | Actually finalize the purchase |
 | `--promo-code` | Apply a promo code at checkout |
 
