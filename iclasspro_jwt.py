@@ -158,6 +158,33 @@ class IClassProAPIClient:
     def _post(self, path: str, payload: dict, params: Optional[dict] = None) -> Any:
         return self._request("POST", path, json_body=payload, params=params)
 
+    def _delete(self, path: str, params: Optional[dict] = None) -> Any:
+        return self._request("DELETE", path, params=params)
+
+    def clear_cart(self, location_id: int = 1) -> None:
+        """Empty the portal shopping cart (``DELETE /clear-cart``)."""
+        self.select_organization(location_id)
+        try:
+            before = self._get("count-cart")
+        except Exception:
+            before = "?"
+        result = self._delete("/clear-cart")
+        try:
+            after = self._get("count-cart")
+        except Exception:
+            after = "?"
+        message = ""
+        if isinstance(result, dict):
+            message = str(result.get("message") or "")
+        elif isinstance(result, str):
+            message = result
+        logger.info(
+            "Cart cleared (count %s → %s). %s",
+            before,
+            after,
+            message or "",
+        )
+
     def resolve_location_id(
         self, location_name: str, *, class_detail: Optional[dict] = None
     ) -> int:
@@ -588,6 +615,37 @@ def enroll_from_schedule(
     return summary, checkout_result
 
 
+def clear_cart_before_enrollment(
+    email: str,
+    password: str,
+    portal: Optional[str] = None,
+    schedule: Optional[list] = None,
+) -> None:
+    """Log in via JWT and empty the cart before Playwright or API enrollment."""
+    portal_slug = (portal or "").strip() or _default_portal_slug()
+    client = IClassProAPIClient(email, password, portal_slug)
+    try:
+        client.login()
+    except Exception as exc:
+        logger.warning("Skipping cart clear (login failed): %s", exc)
+        return
+
+    location_id = 1
+    if schedule:
+        first = schedule[0] if isinstance(schedule[0], dict) else {}
+        loc = (first.get("Location") or first.get("location") or "").strip()
+        if loc:
+            try:
+                location_id = client.resolve_location_id(loc)
+            except Exception as exc:
+                logger.debug("Location resolve for cart clear failed: %s", exc)
+
+    try:
+        client.clear_cart(location_id)
+    except Exception as exc:
+        logger.warning("Could not clear cart before enrollment (continuing): %s", exc)
+
+
 def _match_open_catalog_row(
     client: IClassProAPIClient,
     location: str,
@@ -649,6 +707,10 @@ def run_api_enrollment(args: argparse.Namespace) -> int:
             "ICLASS_ENROLLMENT_DRIVER=playwright in .env or the dashboard driver dropdown."
         )
         return 1
+
+    clear_cart_before_enrollment(
+        args.email, args.password, portal_slug, schedule=schedule
+    )
 
     effective_complete = args.complete_transaction and not args.dry_run
     if args.dry_run and args.complete_transaction:

@@ -2723,6 +2723,15 @@ def main():
         driver.webdriver()
         driver.login(email=args.email, password=args.password)
 
+        from iclasspro_jwt import clear_cart_before_enrollment
+
+        clear_cart_before_enrollment(
+            args.email,
+            args.password,
+            portal=args.portal or None,
+            schedule=schedule,
+        )
+
         for i, class_info in enumerate(schedule):
             log_info = {
                 k: v
