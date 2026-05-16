@@ -416,6 +416,16 @@
                         Promo Code (optional)
                         <input type="text" id="promo_code" value="{{ promo_code }}">
                     </label>
+                    <label>
+                        Enrollment driver
+                        <select id="enrollment_driver" style="width:100%; margin-top:0.25rem;">
+                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — default)</option>
+                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT — fast)</option>
+                        </select>
+                    </label>
+                    <small style="color: var(--muted-color); font-size: 0.8rem;">
+                        HTTP API uses portal JWT endpoints; if login fails, switch back to Playwright.
+                    </small>
                     <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
                         <input type="checkbox" id="complete_transaction" {% if complete_transaction %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
                         <span style="font-size: 0.9rem;">Complete Transaction</span>
@@ -1075,7 +1085,8 @@
                     promo_code: document.getElementById('promo_code').value,
                     complete_transaction: document.getElementById('complete_transaction').checked,
                     send_email: document.getElementById('send_email').checked,
-                    deep_debug: document.getElementById('deep_debug').checked
+                    deep_debug: document.getElementById('deep_debug').checked,
+                    enrollment_driver: document.getElementById('enrollment_driver').value
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
         }
@@ -1118,6 +1129,13 @@
                     saveConfigToEnv();
                 });
             });
+
+            const enrollmentDriver = document.getElementById('enrollment_driver');
+            if (enrollmentDriver) {
+                enrollmentDriver.addEventListener('change', function() {
+                    saveConfigToEnv();
+                });
+            }
         }
 
         // ===== Manual: run schedule =====
@@ -1133,6 +1151,7 @@
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const send_email = document.getElementById("send_email").checked;
             const deep_debug = document.getElementById("deep_debug").checked;
+            const enrollment_driver = document.getElementById("enrollment_driver").value;
             const schedule = getScheduleData();
             const schedulePayload = schedule.map(({ Location, Day, Time }) => ({ Location, Day, Time }));
 
@@ -1162,6 +1181,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver,
                     schedule: schedulePayload
                 }));
             };
@@ -1400,6 +1420,7 @@
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const send_email = document.getElementById("send_email").checked;
             const deep_debug = document.getElementById("deep_debug").checked;
+            const enrollment_driver = document.getElementById("enrollment_driver").value;
 
             saveConfigToEnv();
 
@@ -1433,6 +1454,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver,
                     selected_classes: selected
                 }));
             };

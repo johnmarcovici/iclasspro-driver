@@ -2517,9 +2517,34 @@ def open_api_discovery_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_cli_driver() -> str:
+    """Enrollment driver from env (``playwright`` default)."""
+    enroll = (os.getenv("ICLASS_ENROLLMENT_DRIVER") or "").strip().lower()
+    if enroll == "api":
+        return "api"
+    legacy = (os.getenv("ICLASS_DRIVER") or "").strip().lower()
+    if legacy == "api" and os.getenv("ICLASS_ENROLLMENT_API", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return "api"
+    return "playwright"
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description="iClassPro Enrollment Bot")
+    parser.add_argument(
+        "--driver",
+        type=str,
+        choices=["playwright", "api"],
+        default=_default_cli_driver(),
+        help=(
+            "playwright: browser automation (default). "
+            "api: HTTP JWT enrollment (fast; requires working portal login)."
+        ),
+    )
     parser.add_argument(
         "--portal",
         type=str,
@@ -2630,6 +2655,11 @@ def main():
     args = parser.parse_args()
     if args.scrape:
         sys.exit(open_api_discovery_cli(args))
+
+    if args.driver == "api":
+        from iclasspro_jwt import run_api_enrollment
+
+        sys.exit(run_api_enrollment(args))
 
     # --- Setup Logging ---
     log_file = "iclasspro.log"

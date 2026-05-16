@@ -27,6 +27,7 @@ class SaveConfigRequest(BaseModel):
     complete_transaction: bool
     send_email: bool
     deep_debug: bool
+    enrollment_driver: str = "playwright"
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +40,33 @@ load_dotenv(DOTENV_PATH, override=True)
 def _iclasspro_script() -> str:
     """Path to ``iclasspro.py`` next to this app."""
     return os.path.join(BASE_DIR, "iclasspro.py")
+
+
+def _normalize_driver(value: Optional[str]) -> str:
+    """Return ``api`` or ``playwright``."""
+    if not value:
+        return "playwright"
+    v = str(value).strip().lower()
+    return "api" if v == "api" else "playwright"
+
+
+def _enrollment_driver_resolve(websocket_value: Optional[str] = None) -> str:
+    """Enrollment driver: WebSocket override, then ``ICLASS_ENROLLMENT_DRIVER``, then legacy env."""
+    if websocket_value is not None and str(websocket_value).strip() != "":
+        return _normalize_driver(websocket_value)
+    override = _get_config_value("ICLASS_ENROLLMENT_DRIVER", "").strip()
+    if override:
+        return _normalize_driver(override)
+    if _get_config_value("ICLASS_DRIVER", "").strip().lower() == "api" and _get_config_value(
+        "ICLASS_ENROLLMENT_API", "0"
+    ).strip().lower() in ("1", "true", "yes"):
+        return "api"
+    return "playwright"
+
+
+def _iclasspro_cmd(enrollment_driver: str) -> list:
+    """Build argv prefix for ``iclasspro.py`` with driver flag."""
+    return [_iclasspro_script(), "--driver", _normalize_driver(enrollment_driver)]
 
 
 app = FastAPI(title="iClassPro Enrollment Dashboard")
@@ -99,6 +127,7 @@ async def get(request: Request):
         in ("1", "true", "yes"),
         "deep_debug": _get_config_value("ICLASS_DEEP_DEBUG", "0").lower()
         in ("1", "true", "yes"),
+        "enrollment_driver": _enrollment_driver_resolve(),
         "initial_schedule": [],
         "default_schedule_filename": None,
         "locations": _load_locations(),
@@ -144,6 +173,8 @@ async def save_config(request: SaveConfigRequest):
     )
     set_key(DOTENV_PATH, "ICLASS_SEND_EMAIL", "1" if request.send_email else "0")
     set_key(DOTENV_PATH, "ICLASS_DEEP_DEBUG", "1" if request.deep_debug else "0")
+    ed = _normalize_driver(request.enrollment_driver)
+    set_key(DOTENV_PATH, "ICLASS_ENROLLMENT_DRIVER", ed)
     os.environ["ICLASS_EMAIL"] = request.email
     os.environ["ICLASS_PASSWORD"] = request.password
     os.environ["ICLASS_STUDENT_ID"] = request.student_id
@@ -153,6 +184,7 @@ async def save_config(request: SaveConfigRequest):
     )
     os.environ["ICLASS_SEND_EMAIL"] = "1" if request.send_email else "0"
     os.environ["ICLASS_DEEP_DEBUG"] = "1" if request.deep_debug else "0"
+    os.environ["ICLASS_ENROLLMENT_DRIVER"] = ed
     return {"message": "Configuration saved"}
 
 
@@ -306,6 +338,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
         complete_transaction = _as_bool(config.get("complete_transaction", True), True)
         send_email = _as_bool(config.get("send_email", False))
         deep_debug = _as_bool(config.get("deep_debug", False))
+        enrollment_driver = _enrollment_driver_resolve(config.get("enrollment_driver"))
         selected_classes = config.get("selected_classes", [])
 
         if not all([email, password, student_id]):
@@ -327,8 +360,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
 
         await websocket.send_text("Starting enrollment of selected classes...")
 
-        cmd_args = [
-            _iclasspro_script(),
+        cmd_args = _iclasspro_cmd(enrollment_driver) + [
             "--email",
             email,
             "--password",
@@ -353,6 +385,7 @@ async def websocket_enroll_selected(websocket: WebSocket):
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+        child_env["ICLASS_ENROLLMENT_DRIVER"] = enrollment_driver
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -431,6 +464,7 @@ async def websocket_endpoint(websocket: WebSocket):
         complete_transaction = _as_bool(config.get("complete_transaction", True), True)
         send_email = _as_bool(config.get("send_email", False))
         deep_debug = _as_bool(config.get("deep_debug", False))
+        enrollment_driver = _enrollment_driver_resolve(config.get("enrollment_driver"))
         schedule = config.get("schedule", [])
 
         if not all([email, password, student_id]):
@@ -456,8 +490,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text("Starting iClassPro automation...")
 
         # Build the command arguments
-        cmd_args = [
-            _iclasspro_script(),
+        cmd_args = _iclasspro_cmd(enrollment_driver) + [
             "--email",
             email,
             "--password",
@@ -482,6 +515,7 @@ async def websocket_endpoint(websocket: WebSocket):
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
+        child_env["ICLASS_ENROLLMENT_DRIVER"] = enrollment_driver
 
         process = await asyncio.create_subprocess_exec(
             sys.executable,
