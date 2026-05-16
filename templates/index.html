@@ -416,6 +416,16 @@
                         Promo Code (optional)
                         <input type="text" id="promo_code" value="{{ promo_code }}">
                     </label>
+                    <label>
+                        Enrollment driver
+                        <select id="enrollment_driver" style="width:100%; margin-top:0.25rem;">
+                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT — default)</option>
+                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — fallback)</option>
+                        </select>
+                    </label>
+                    <small style="color: var(--muted-color); font-size: 0.8rem;">
+                        HTTP API is the default. Use Playwright only if JWT login fails.
+                    </small>
                     <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
                         <input type="checkbox" id="complete_transaction" {% if complete_transaction %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">
                         <span style="font-size: 0.9rem;">Complete Transaction</span>
@@ -982,6 +992,22 @@
         }
 
         // ===== Shared status / terminal / stop =====
+        /** Parse enrollment subprocess output; avoid matching "0 failed" in Summary lines. */
+        function parseEnrollmentRunOutcome(terminalText) {
+            const t = terminalText || '';
+            if (/Enrollment completed successfully/i.test(t)) return 'success';
+            if (/Enrollment finished with some failures/i.test(t)) return 'partial';
+            if (/Enrollment failed with exit code/i.test(t)) return 'error';
+            if (/ERROR - Failed to enroll/i.test(t)) return 'error';
+            if (/\bfailed to enroll\b/i.test(t)) return 'error';
+            const summary = t.match(/Summary:\s*(\d+)\s+added,\s*\d+\s+skipped,\s*(\d+)\s+failed/i);
+            if (summary) {
+                if (parseInt(summary[2], 10) > 0) return 'error';
+                if (parseInt(summary[1], 10) > 0) return 'success';
+            }
+            return null;
+        }
+
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
             statusIndicator.innerText = text;
@@ -1075,7 +1101,8 @@
                     promo_code: document.getElementById('promo_code').value,
                     complete_transaction: document.getElementById('complete_transaction').checked,
                     send_email: document.getElementById('send_email').checked,
-                    deep_debug: document.getElementById('deep_debug').checked
+                    deep_debug: document.getElementById('deep_debug').checked,
+                    enrollment_driver: document.getElementById('enrollment_driver').value
                 })
             }).catch(err => console.error('Could not save config to .env:', err));
         }
@@ -1118,6 +1145,13 @@
                     saveConfigToEnv();
                 });
             });
+
+            const enrollmentDriver = document.getElementById('enrollment_driver');
+            if (enrollmentDriver) {
+                enrollmentDriver.addEventListener('change', function() {
+                    saveConfigToEnv();
+                });
+            }
         }
 
         // ===== Manual: run schedule =====
@@ -1133,6 +1167,7 @@
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const send_email = document.getElementById("send_email").checked;
             const deep_debug = document.getElementById("deep_debug").checked;
+            const enrollment_driver = document.getElementById("enrollment_driver").value;
             const schedule = getScheduleData();
             const schedulePayload = schedule.map(({ Location, Day, Time }) => ({ Location, Day, Time }));
 
@@ -1162,6 +1197,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver,
                     schedule: schedulePayload
                 }));
             };
@@ -1170,11 +1206,13 @@
 
             activeWs.onclose = function() {
                 if (isStopped) { activeWs = null; activeKind = null; return; }
-                if (terminal.innerText.includes("successfully")) {
+                const outcome = parseEnrollmentRunOutcome(terminal.innerText);
+                if (outcome === 'success' || outcome === 'partial') {
                     const total = document.querySelectorAll(".schedule-row").length;
                     const done = document.querySelectorAll(".status-done").length;
-                    updateStatus("success", `Completed: ${done} of ${total} classes added`);
-                } else if (terminal.innerText.includes("failed") || terminal.innerText.includes("Error")) {
+                    const label = outcome === 'partial' ? 'Completed with issues' : `Completed: ${done} of ${total} classes added`;
+                    updateStatus("success", label);
+                } else if (outcome === 'error' || /Error:/.test(terminal.innerText)) {
                     updateStatus("error", "Failed");
                 } else {
                     updateStatus("idle", "Disconnected");
@@ -1400,6 +1438,7 @@
             const complete_transaction = document.getElementById("complete_transaction").checked;
             const send_email = document.getElementById("send_email").checked;
             const deep_debug = document.getElementById("deep_debug").checked;
+            const enrollment_driver = document.getElementById("enrollment_driver").value;
 
             saveConfigToEnv();
 
@@ -1433,6 +1472,7 @@
                     complete_transaction,
                     send_email,
                     deep_debug,
+                    enrollment_driver,
                     selected_classes: selected
                 }));
             };
@@ -1442,10 +1482,13 @@
             activeWs.onclose = function(event) {
                 if (isStopped) { activeWs = null; activeKind = null; return; }
                 const content = terminal.innerText || '';
-                if (content.includes('failed') || content.includes('Error')) {
-                    updateStatus('error', 'Failed');
-                } else if (content.includes('successfully')) {
+                const outcome = parseEnrollmentRunOutcome(content);
+                if (outcome === 'success') {
                     updateStatus('success', 'Completed');
+                } else if (outcome === 'partial') {
+                    updateStatus('success', 'Completed with issues');
+                } else if (outcome === 'error' || /Error:/.test(content)) {
+                    updateStatus('error', 'Failed');
                 } else if (event && event.code !== 1000 && event.code !== 1001) {
                     updateStatus('error', 'Connection lost');
                 } else {
