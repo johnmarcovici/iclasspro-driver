@@ -158,25 +158,54 @@ class IClassProAPIClient:
     def _post(self, path: str, payload: dict, params: Optional[dict] = None) -> Any:
         return self._request("POST", path, json_body=payload, params=params)
 
-    def resolve_location_id(self, location_name: str) -> int:
-        """Map a schedule location label to Open API location id."""
+    def resolve_location_id(
+        self, location_name: str, *, class_detail: Optional[dict] = None
+    ) -> int:
+        """Resolve cart ``locationId`` (org location, not room name).
+
+        Physical sites like \"El Segundo\" map to ``roomName`` on the class; JWT
+        cart APIs use the org location id (typically ``1`` for SCAQ).
+        """
+        if class_detail and class_detail.get("locationId") is not None:
+            return int(class_detail["locationId"])
+
         key = location_name.strip().lower()
         if key in self._location_ids:
             return self._location_ids[key]
-        data = self._fetch_open(f"{self.portal}/locations")
-        rows = data if isinstance(data, list) else (data or {}).get("data") or []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            name = str(row.get("name") or "").strip()
-            lid = row.get("id")
-            if name and lid is not None:
-                self._location_ids[name.lower()] = int(lid)
-        needle = key
+
+        try:
+            rows = self._get("locations")
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict) and row.get("id") is not None:
+                        name = str(row.get("name") or "").strip().lower()
+                        self._location_ids[name] = int(row["id"])
+        except Exception as exc:
+            logger.debug("JWT locations lookup failed: %s", exc)
+
+        if len(self._location_ids) == 1:
+            return next(iter(self._location_ids.values()))
+
         for name, lid in self._location_ids.items():
-            if needle == name or needle in name or name in needle:
+            if key == name or key in name or name in key:
                 return lid
-        raise ValueError(f"Could not resolve location id for {location_name!r}")
+
+        logger.warning(
+            "Could not map location %r to a JWT location id; using 1.",
+            location_name,
+        )
+        return 1
+
+    def select_organization(self, location_id: int) -> None:
+        """Prime org/location context (portal calls this before cart operations)."""
+        self._post(
+            "organizations",
+            {
+                "code": self.portal,
+                "bundleIdentifier": None,
+                "location": location_id,
+            },
+        )
 
     def _fetch_open(self, path: str, params: Optional[dict] = None) -> Any:
         slug_path = path.strip("/")
@@ -242,27 +271,66 @@ class IClassProAPIClient:
 
     def _build_cart_item_payload(
         self,
-        new_cart_data: dict,
-        class_id: int,
-        session_id: int,
+        class_detail: dict,
+        session: dict,
         student_id: int,
+        cart_item_id: str,
         *,
         start_date: Optional[str] = None,
     ) -> dict:
-        """Build a ``newCartItems[]`` element from ``new-cart-item`` API data."""
-        item = dict(new_cart_data.get("cartItem") or new_cart_data.get("newCartItem") or {})
-        if not item:
-            details = new_cart_data.get("cartItemDetails") or {}
-            if isinstance(details, dict) and details:
-                item = {"cartItemDetails": details}
-        item.setdefault("objectId", class_id)
-        item.setdefault("sessionId", session_id)
-        item.setdefault("selectedStudentIds", [student_id])
-        if start_date:
-            item.setdefault("startDate", start_date)
-        elif new_cart_data.get("startDate"):
-            item.setdefault("startDate", new_cart_data.get("startDate"))
-        return item
+        """Build ``newCartItems[]`` element matching the portal SPA shape."""
+        class_id = int(class_detail.get("id"))
+        session_id = int(session.get("id") or session.get("sessionId"))
+        available = class_detail.get("availableDays") or []
+        start = start_date or (available[0] if available else None)
+        end = session.get("endDate") or start
+        session_payload = dict(session)
+        if start and not session_payload.get("nextAvailableDate"):
+            session_payload["nextAvailableDate"] = start
+
+        return {
+            "cartItemId": cart_item_id,
+            "objectId": class_id,
+            "cartItemType": "class-enrollment",
+            "enrollmentType": "active",
+            "studentId": student_id,
+            "sessionId": session_id,
+            "sessions": [session_payload],
+            "startDate": start,
+            "endDate": end,
+            "blocks": [],
+            "addOns": [],
+            "recurring": False,
+            "objectName": (class_detail.get("name") or "").strip(),
+        }
+
+    @staticmethod
+    def _cart_errors(data: Any) -> list:
+        if not isinstance(data, dict):
+            return []
+        out: list = []
+        for entry in data.get("errors") or []:
+            if entry:
+                out.append(entry)
+        for entry in data.get("cartItems") or []:
+            if isinstance(entry, dict) and entry.get("errors"):
+                out.append(entry)
+        if data.get("success") is False and not out:
+            out.append({"message": "cart operation failed"})
+        return out
+
+    @staticmethod
+    def _format_cart_errors(errors: list) -> str:
+        parts = []
+        for entry in errors:
+            if isinstance(entry, dict):
+                if entry.get("errors"):
+                    parts.extend(str(x) for x in entry["errors"])
+                elif entry.get("message"):
+                    parts.append(str(entry["message"]))
+            else:
+                parts.append(str(entry))
+        return "; ".join(parts) or "Cart API rejected the item."
 
     def add_session_to_cart(
         self,
@@ -271,6 +339,7 @@ class IClassProAPIClient:
         student_id: int,
         location_id: int,
         *,
+        class_detail: Optional[dict] = None,
         start_date: Optional[str] = None,
     ) -> None:
         """Validate and add one session — mirrors portal Enroll → Add to Cart."""
@@ -281,21 +350,65 @@ class IClassProAPIClient:
             student_id,
             location_id,
         )
+        detail = class_detail or self.get_class_detail(class_id, student_id)
+        sessions = detail.get("sessions") or []
+        session = next(
+            (s for s in sessions if int(s.get("id") or s.get("sessionId") or 0) == int(session_id)),
+            sessions[0] if sessions else None,
+        )
+        if not session:
+            raise ValueError(f"No session {session_id} on class {class_id}")
+
+        self.select_organization(location_id)
         draft = self.fetch_new_cart_item(
             class_id, session_id, student_id, start_date=start_date
         )
+        cart_item_id = draft.get("cartItemId")
+        if not cart_item_id:
+            raise RuntimeError(f"new-cart-item returned no cartItemId: {draft}")
+
         cart_item = self._build_cart_item_payload(
-            draft, class_id, session_id, student_id, start_date=start_date
+            detail, session, student_id, str(cart_item_id), start_date=start_date
         )
-        new_cart_items = [cart_item]
-        body = {"newCartItems": new_cart_items, "locationId": location_id}
-        self._post("/validate-cart-item", body)
-        self._post("/add-cart-item", body)
+        body = {
+            "newCartItems": [cart_item],
+            "locationId": location_id,
+            "guestCheckoutKey": None,
+        }
+        validated = self._post("/validate-cart-item", body)
+        val_errors = self._cart_errors(validated)
+        if val_errors:
+            msg = self._format_cart_errors(val_errors)
+            if "already" in msg.lower() or "conflicting enrollment" in msg.lower():
+                raise EnrollmentSkipped(msg)
+            raise IClassProAPIError(msg)
+
+        added = self._post("/add-cart-item", body)
+        add_errors = self._cart_errors(added)
+        if add_errors or (isinstance(added, dict) and added.get("success") is False):
+            msg = self._format_cart_errors(add_errors)
+            if "already" in msg.lower() or "conflicting enrollment" in msg.lower():
+                raise EnrollmentSkipped(msg)
+            raise IClassProAPIError(msg or "add-cart-item failed.")
+
         logger.info("Cart item added (class=%s, session=%s).", class_id, session_id)
 
     def apply_promo_code(self, code: str) -> None:
         logger.info("Applying promo code: %s", code)
-        self._post("/add-promo-code", {"promoCode": code, "promoCodes": [code]})
+        last_error: Optional[Exception] = None
+        for variant in (code, code.lower(), code.upper()):
+            if not variant:
+                continue
+            try:
+                self._post(
+                    "/add-promo-code",
+                    {"promoCode": variant, "promoCodes": [variant]},
+                )
+                return
+            except Exception as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
 
     def validate_cart(self, location_id: int) -> dict:
         data = self._get(f"/validate-cart/{location_id}")
@@ -396,17 +509,11 @@ def enroll_from_schedule(
         }
 
         try:
-            location_id = client.resolve_location_id(location)
             class_url = str(entry.get("url") or "").strip()
             class_id = _parse_class_id_from_url(class_url)
 
             day_idx = DAY_TO_QUERY_INDEX.get(day.lower())
-            open_row = None
-            if class_id is not None:
-                open_row = client.fetch_open_class_row(
-                    class_id, day_index=day_idx, location_filter=location
-                )
-            elif day_idx is not None:
+            if class_id is None and day_idx is not None:
                 open_row = _match_open_catalog_row(client, location, time_str, day_idx)
                 if open_row:
                     class_id = int(open_row["id"])
@@ -414,30 +521,26 @@ def enroll_from_schedule(
             if class_id is None:
                 raise ValueError(f"No class found for {label}")
 
-            session_id = None
-            start_date = None
-            if open_row:
-                session_id = _session_id_from_open_row(open_row)
-                start_date = open_row.get("startDate") or None
-                if not start_date:
-                    dates = open_row.get("availableDates") or []
-                    if dates:
-                        start_date = dates[0]
-
-            if session_id is None:
-                detail = client.get_class_detail(class_id, student_id)
-                sessions = detail.get("sessions") or []
-                if not sessions:
-                    raise ValueError(f"No sessions found for class {class_id}")
-                sess = sessions[0]
-                session_id = int(sess.get("id") or sess.get("sessionId"))
-                start_date = start_date or sess.get("startDate")
+            detail = client.get_class_detail(class_id, student_id)
+            location_id = client.resolve_location_id(location, class_detail=detail)
+            sessions = detail.get("sessions") or []
+            if not sessions:
+                raise ValueError(f"No sessions found for class {class_id}")
+            sess = sessions[0]
+            session_id = int(sess.get("id") or sess.get("sessionId"))
+            available = detail.get("availableDays") or []
+            start_date = (
+                (available[0] if available else None)
+                or sess.get("startDate")
+                or detail.get("transferDate")
+            )
 
             client.add_session_to_cart(
                 class_id,
                 session_id,
                 student_id,
                 location_id,
+                class_detail=detail,
                 start_date=start_date,
             )
             added_by_location[location_id] = added_by_location.get(location_id, 0) + 1
@@ -455,24 +558,32 @@ def enroll_from_schedule(
         summary.append(result)
 
     checkout_result: Optional[dict] = None
-    if added_by_location and complete_transaction:
+    if added_by_location:
         if promo_code:
             try:
                 client.apply_promo_code(promo_code)
+                logger.info("Promo code applied.")
             except Exception as exc:
                 logger.warning("Promo code failed (continuing): %s", exc)
 
-        # One checkout per location that received items (usually one).
-        checkout_results = []
-        for loc_id in added_by_location:
-            checkout_results.append(client.checkout(loc_id, complete_transaction=True))
-        checkout_result = (
-            checkout_results[0] if len(checkout_results) == 1 else checkout_results
-        )
-
-    elif added_by_location and not complete_transaction:
-        loc_id = next(iter(added_by_location))
-        checkout_result = client.checkout(loc_id, complete_transaction=False)
+        if complete_transaction:
+            checkout_results = []
+            for loc_id in added_by_location:
+                checkout_results.append(
+                    client.checkout(loc_id, complete_transaction=True)
+                )
+            checkout_result = (
+                checkout_results[0] if len(checkout_results) == 1 else checkout_results
+            )
+        else:
+            loc_id = next(iter(added_by_location))
+            cart_state = client.validate_cart(loc_id)
+            checkout_result = {
+                "dry_run": True,
+                "message": "Transaction not submitted (dry-run mode).",
+                "cart_total_due": cart_state.get("totalCartDueAmount"),
+                "cart_items": len(cart_state.get("cartItems") or []),
+            }
 
     return summary, checkout_result
 
