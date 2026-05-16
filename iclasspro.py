@@ -2518,8 +2518,10 @@ def open_api_discovery_cli(args: argparse.Namespace) -> int:
 
 
 def _default_cli_driver() -> str:
-    """Enrollment driver from env (``playwright`` default)."""
+    """Enrollment driver from env (``api`` default)."""
     enroll = (os.getenv("ICLASS_ENROLLMENT_DRIVER") or "").strip().lower()
+    if enroll == "playwright":
+        return "playwright"
     if enroll == "api":
         return "api"
     legacy = (os.getenv("ICLASS_DRIVER") or "").strip().lower()
@@ -2529,7 +2531,7 @@ def _default_cli_driver() -> str:
         "yes",
     ):
         return "api"
-    return "playwright"
+    return "api"
 
 
 def main():
@@ -2541,8 +2543,8 @@ def main():
         choices=["playwright", "api"],
         default=_default_cli_driver(),
         help=(
-            "playwright: browser automation (default). "
-            "api: HTTP JWT enrollment (fast; requires working portal login)."
+            "api: HTTP JWT enrollment (default, fast). "
+            "playwright: browser automation (fallback if JWT login fails)."
         ),
     )
     parser.add_argument(

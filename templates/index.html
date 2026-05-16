@@ -419,12 +419,12 @@
                     <label>
                         Enrollment driver
                         <select id="enrollment_driver" style="width:100%; margin-top:0.25rem;">
-                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — default)</option>
-                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT — fast)</option>
+                            <option value="api" {% if enrollment_driver == 'api' %}selected{% endif %}>HTTP API (JWT — default)</option>
+                            <option value="playwright" {% if enrollment_driver == 'playwright' %}selected{% endif %}>Playwright (browser — fallback)</option>
                         </select>
                     </label>
                     <small style="color: var(--muted-color); font-size: 0.8rem;">
-                        HTTP API uses portal JWT endpoints; if login fails, switch back to Playwright.
+                        HTTP API is the default. Use Playwright only if JWT login fails.
                     </small>
                     <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.4rem;">
                         <input type="checkbox" id="complete_transaction" {% if complete_transaction %}checked{% endif %} style="width:1.1rem; height:1.1rem; margin:0; cursor:pointer;">

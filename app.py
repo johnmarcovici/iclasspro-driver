@@ -27,7 +27,7 @@ class SaveConfigRequest(BaseModel):
     complete_transaction: bool
     send_email: bool
     deep_debug: bool
-    enrollment_driver: str = "playwright"
+    enrollment_driver: str = "api"
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,7 +45,7 @@ def _iclasspro_script() -> str:
 def _normalize_driver(value: Optional[str]) -> str:
     """Return ``api`` or ``playwright``."""
     if not value:
-        return "playwright"
+        return "api"
     v = str(value).strip().lower()
     return "api" if v == "api" else "playwright"
 
@@ -61,7 +61,7 @@ def _enrollment_driver_resolve(websocket_value: Optional[str] = None) -> str:
         "ICLASS_ENROLLMENT_API", "0"
     ).strip().lower() in ("1", "true", "yes"):
         return "api"
-    return "playwright"
+    return "api"
 
 
 def _iclasspro_cmd(enrollment_driver: str) -> list:
