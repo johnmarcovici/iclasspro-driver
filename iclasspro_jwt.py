@@ -420,18 +420,31 @@ class IClassProAPIClient:
 
         logger.info("Cart item added (class=%s, session=%s).", class_id, session_id)
 
-    def apply_promo_code(self, code: str) -> None:
-        logger.info("Applying promo code: %s", code)
+    def apply_promo_code(self, code: str, *, location_id: int = 1) -> None:
+        """Apply a cart promo (portal SPA: ``promoCode`` + empty ``promoCodes``)."""
+        raw = code.strip()
+        if not raw:
+            return
+        self.select_organization(location_id)
+        logger.info("Applying promo code...")
         last_error: Optional[Exception] = None
-        for variant in (code, code.lower(), code.upper()):
+        # Portal sends lowercase promoCode and promoCodes: [] (not [code]).
+        for variant in (raw.lower(), raw):
             if not variant:
                 continue
             try:
                 self._post(
                     "/add-promo-code",
-                    {"promoCode": variant, "promoCodes": [variant]},
+                    {"promoCode": variant, "promoCodes": []},
                 )
-                return
+                cart_state = self.validate_cart(location_id)
+                if cart_state.get("promoCodes"):
+                    due = cart_state.get("totalCartDueAmount")
+                    logger.info(
+                        "Promo applied (cart due=%s).", due if due is not None else "?"
+                    )
+                    return
+                raise IClassProAPIError("Promo request succeeded but cart has no promo.")
             except Exception as exc:
                 last_error = exc
         if last_error:
@@ -587,11 +600,8 @@ def enroll_from_schedule(
     checkout_result: Optional[dict] = None
     if added_by_location:
         if promo_code:
-            try:
-                client.apply_promo_code(promo_code)
-                logger.info("Promo code applied.")
-            except Exception as exc:
-                logger.warning("Promo code failed (continuing): %s", exc)
+            loc_id = next(iter(added_by_location))
+            client.apply_promo_code(promo_code, location_id=loc_id)
 
         if complete_transaction:
             checkout_results = []
@@ -610,6 +620,11 @@ def enroll_from_schedule(
                 "message": "Transaction not submitted (dry-run mode).",
                 "cart_total_due": cart_state.get("totalCartDueAmount"),
                 "cart_items": len(cart_state.get("cartItems") or []),
+                "promo_codes": [
+                    p.get("code")
+                    for p in (cart_state.get("promoCodes") or [])
+                    if isinstance(p, dict)
+                ],
             }
 
     return summary, checkout_result
