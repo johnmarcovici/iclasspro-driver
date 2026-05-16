@@ -8,6 +8,15 @@ Reverse-engineered from the customer portal SPA (``/api/jwt/v1`` on
 
 from __future__ import annotations
 
+import warnings
+
+try:
+    from urllib3.exceptions import NotOpenSSLWarning
+
+    warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
+except ImportError:
+    warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
+
 import argparse
 import json
 import logging

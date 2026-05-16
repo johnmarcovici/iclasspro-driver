@@ -992,6 +992,22 @@
         }
 
         // ===== Shared status / terminal / stop =====
+        /** Parse enrollment subprocess output; avoid matching "0 failed" in Summary lines. */
+        function parseEnrollmentRunOutcome(terminalText) {
+            const t = terminalText || '';
+            if (/Enrollment completed successfully/i.test(t)) return 'success';
+            if (/Enrollment finished with some failures/i.test(t)) return 'partial';
+            if (/Enrollment failed with exit code/i.test(t)) return 'error';
+            if (/ERROR - Failed to enroll/i.test(t)) return 'error';
+            if (/\bfailed to enroll\b/i.test(t)) return 'error';
+            const summary = t.match(/Summary:\s*(\d+)\s+added,\s*\d+\s+skipped,\s*(\d+)\s+failed/i);
+            if (summary) {
+                if (parseInt(summary[2], 10) > 0) return 'error';
+                if (parseInt(summary[1], 10) > 0) return 'success';
+            }
+            return null;
+        }
+
         function updateStatus(state, text) {
             statusIndicator.className = `status-${state}`;
             statusIndicator.innerText = text;
@@ -1190,11 +1206,13 @@
 
             activeWs.onclose = function() {
                 if (isStopped) { activeWs = null; activeKind = null; return; }
-                if (terminal.innerText.includes("successfully")) {
+                const outcome = parseEnrollmentRunOutcome(terminal.innerText);
+                if (outcome === 'success' || outcome === 'partial') {
                     const total = document.querySelectorAll(".schedule-row").length;
                     const done = document.querySelectorAll(".status-done").length;
-                    updateStatus("success", `Completed: ${done} of ${total} classes added`);
-                } else if (terminal.innerText.includes("failed") || terminal.innerText.includes("Error")) {
+                    const label = outcome === 'partial' ? 'Completed with issues' : `Completed: ${done} of ${total} classes added`;
+                    updateStatus("success", label);
+                } else if (outcome === 'error' || /Error:/.test(terminal.innerText)) {
                     updateStatus("error", "Failed");
                 } else {
                     updateStatus("idle", "Disconnected");
@@ -1464,10 +1482,13 @@
             activeWs.onclose = function(event) {
                 if (isStopped) { activeWs = null; activeKind = null; return; }
                 const content = terminal.innerText || '';
-                if (content.includes('failed') || content.includes('Error')) {
-                    updateStatus('error', 'Failed');
-                } else if (content.includes('successfully')) {
+                const outcome = parseEnrollmentRunOutcome(content);
+                if (outcome === 'success') {
                     updateStatus('success', 'Completed');
+                } else if (outcome === 'partial') {
+                    updateStatus('success', 'Completed with issues');
+                } else if (outcome === 'error' || /Error:/.test(content)) {
+                    updateStatus('error', 'Failed');
                 } else if (event && event.code !== 1000 && event.code !== 1001) {
                     updateStatus('error', 'Connection lost');
                 } else {
