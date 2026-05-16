@@ -2,6 +2,9 @@ import asyncio
 import json
 import os
 import sys
+import warnings
+
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 from typing import Dict, List, Optional
 
 import yaml
@@ -382,6 +385,10 @@ async def websocket_enroll_selected(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
+        child_env.setdefault(
+            "PYTHONWARNINGS",
+            "ignore:urllib3 v2 only supports OpenSSL:Warning",
+        )
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"
@@ -512,6 +519,10 @@ async def websocket_endpoint(websocket: WebSocket):
             cmd_args.append("--deep-debug")
 
         child_env = os.environ.copy()
+        child_env.setdefault(
+            "PYTHONWARNINGS",
+            "ignore:urllib3 v2 only supports OpenSSL:Warning",
+        )
         child_env["ICLASS_COMPLETE_TRANSACTION"] = "1" if complete_transaction else "0"
         child_env["ICLASS_DEEP_DEBUG"] = "1" if deep_debug else "0"
         child_env["ICLASS_SEND_EMAIL"] = "1" if send_email else "0"

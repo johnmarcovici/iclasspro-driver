@@ -3,12 +3,8 @@ from __future__ import annotations
 
 import warnings
 
-try:
-    from urllib3.exceptions import NotOpenSSLWarning
-
-    warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
-except ImportError:
-    warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
+# Must run before any urllib3 import (including NotOpenSSLWarning).
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 import argparse
 import json
