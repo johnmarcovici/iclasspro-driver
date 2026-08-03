@@ -1043,14 +1043,16 @@
         function parseEnrollmentRunOutcome(terminalText) {
             const t = terminalText || '';
             if (/Enrollment completed successfully/i.test(t)) return 'success';
+            if (/Automation completed successfully/i.test(t)) return 'success';
             if (/Enrollment finished with some failures/i.test(t)) return 'partial';
             if (/Enrollment failed with exit code/i.test(t)) return 'error';
+            if (/Automation failed with exit code/i.test(t)) return 'error';
             if (/ERROR - Failed to enroll/i.test(t)) return 'error';
             if (/\bfailed to enroll\b/i.test(t)) return 'error';
             const summary = t.match(/Summary:\s*(\d+)\s+added,\s*\d+\s+skipped,\s*(\d+)\s+failed/i);
             if (summary) {
                 if (parseInt(summary[2], 10) > 0) return 'error';
-                if (parseInt(summary[1], 10) > 0) return 'success';
+                return 'success';
             }
             return null;
         }

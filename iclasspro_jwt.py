@@ -695,81 +695,218 @@ def _match_open_catalog_row(
     return None
 
 
+def _setup_enrollment_logging(log_file: str = "iclasspro.log") -> None:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    file_handler = logging.FileHandler(log_file, mode="w")
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+
+def _api_summary_to_report_rows(summary: list) -> list:
+    return [
+        {
+            "class": {
+                "day": row.get("day", ""),
+                "time": row.get("time", ""),
+                "location": row.get("location", ""),
+            },
+            "status": row.get("status", "Unknown"),
+            "error": row.get("details", "") if row.get("status") != "Success" else "",
+        }
+        for row in summary
+    ]
+
+
+def _finalize_api_enrollment_run(
+    args: argparse.Namespace,
+    summary: list,
+    *,
+    run_started_at: str,
+    main_exception: Optional[Exception] = None,
+    log_file: str = "iclasspro.log",
+) -> None:
+    from datetime import datetime, timezone
+
+    summary_data = _api_summary_to_report_rows(summary)
+    report_path = getattr(args, "report_path", None) or os.getenv(
+        "ICLASS_RUN_REPORT", "run_report.json"
+    )
+    try:
+        counts = {
+            "total": len(summary_data),
+            "success": sum(1 for r in summary_data if r.get("status") == "Success"),
+            "skipped": sum(1 for r in summary_data if r.get("status") == "Skipped"),
+            "failed": sum(1 for r in summary_data if r.get("status") == "Failed"),
+        }
+        report = {
+            "mode": "enrollment",
+            "driver": "api",
+            "started_at": run_started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "base_url": getattr(args, "base_url", None),
+            "schedule_path": getattr(args, "schedule", None),
+            "complete_transaction": (
+                args.complete_transaction and not args.dry_run
+            ),
+            "summary": counts,
+            "results": summary_data,
+            "critical_error": str(main_exception) if main_exception else None,
+        }
+        with open(report_path, "w", encoding="utf-8") as rf:
+            json.dump(report, rf, indent=2)
+        logger.info("Run report written to %s.", report_path)
+    except Exception as report_err:
+        logger.warning("Failed to write run report: %s", report_err)
+
+    if getattr(args, "send_email", False):
+        logger.info("Email sending is enabled. Checking credentials...")
+        to_addr = args.email
+        from_addr = args.email
+        app_password = os.getenv("ICLASS_EMAIL_APP_PASSWORD")
+        smtp_server = os.getenv("ICLASS_SMTP_SERVER")
+        smtp_port = int(os.getenv("ICLASS_SMTP_PORT", "587"))
+        if all([to_addr, from_addr, app_password, smtp_server]):
+            from iclasspro import send_log_email
+
+            send_log_email(
+                log_file,
+                to_addr,
+                from_addr,
+                app_password,
+                smtp_server,
+                smtp_port,
+                summary_data=summary_data,
+            )
+        else:
+            logger.warning(
+                "Cannot send log email. Missing one or more required environment variables."
+            )
+
+
 def run_api_enrollment(args: argparse.Namespace) -> int:
     """JWT enrollment entry (called from ``iclasspro.py --driver api``)."""
-    if not args.email or not args.password:
-        logger.error("--email and --password required for API enrollment.")
+    if not all([args.email, args.password, args.student_id]):
+        logger.error(
+            "Missing required environment variables or arguments: "
+            "ICLASS_EMAIL, ICLASS_PASSWORD, ICLASS_STUDENT_ID"
+        )
         return 1
     if not args.schedule:
         logger.error("--schedule required for enrollment.")
         return 1
 
-    portal_slug = args.portal or _default_portal_slug()
-    try:
-        with open(args.schedule, encoding="utf-8") as fh:
-            schedule = json.load(fh)
-    except OSError as exc:
-        logger.error("Could not read schedule %r: %s", args.schedule, exc)
-        return 1
+    log_file = "iclasspro.log"
+    _setup_enrollment_logging(log_file)
 
-    if not schedule:
-        logger.error("Schedule is empty.")
-        return 1
+    from datetime import datetime, timezone
 
-    client = IClassProAPIClient(args.email, args.password, portal_slug)
-    try:
-        client.login()
-    except Exception as exc:
-        logger.error("Login failed: %s", exc)
-        logger.error(
-            "Use Playwright for enrollment if JWT login fails: "
-            "ICLASS_ENROLLMENT_DRIVER=playwright in .env or the dashboard driver dropdown."
-        )
-        return 1
-
-    clear_cart_before_enrollment(
-        args.email, args.password, portal_slug, schedule=schedule
-    )
-
-    effective_complete = args.complete_transaction and not args.dry_run
-    if args.dry_run and args.complete_transaction:
-        logger.info("Dry-run flag enabled; overriding complete-transaction.")
-
+    run_started_at = datetime.now(timezone.utc).isoformat()
+    logger.info("Starting iClassPro API enrollment for email: %s", args.email)
+    logger.info("Student ID: %s", args.student_id)
     logger.info(
-        "API enrollment: %d class(es), complete_transaction=%s",
-        len(schedule),
-        effective_complete,
+        "Send email enabled (effective): %s", bool(getattr(args, "send_email", False))
     )
 
-    summary, checkout_result = enroll_from_schedule(
-        client,
-        schedule,
-        int(args.student_id),
-        promo_code=args.promo_code or None,
-        complete_transaction=effective_complete,
-    )
+    portal_slug = args.portal or _default_portal_slug()
+    summary: list = []
+    checkout_result: Optional[dict] = None
+    main_exception: Optional[Exception] = None
+    exit_code = 1
 
-    print("\n=== Enrollment Run Report ===")
-    for row in summary:
-        icon = {"Success": "\u2714", "Skipped": "\u27f3", "Failed": "\u2718"}.get(
-            row.get("status"), "?"
+    try:
+        try:
+            student_id = int(args.student_id)
+        except (TypeError, ValueError):
+            logger.error("Invalid student ID: %r", args.student_id)
+            return 1
+
+        try:
+            with open(args.schedule, encoding="utf-8") as fh:
+                schedule = json.load(fh)
+        except OSError as exc:
+            logger.error("Could not read schedule %r: %s", args.schedule, exc)
+            return 1
+
+        if not schedule:
+            logger.error("Schedule is empty.")
+            return 1
+
+        client = IClassProAPIClient(args.email, args.password, portal_slug)
+        try:
+            client.login()
+        except Exception as exc:
+            logger.error("Login failed: %s", exc)
+            logger.error(
+                "Use Playwright for enrollment if JWT login fails: "
+                "ICLASS_ENROLLMENT_DRIVER=playwright in .env or the dashboard driver dropdown."
+            )
+            return 1
+
+        clear_cart_before_enrollment(
+            args.email, args.password, portal_slug, schedule=schedule
         )
-        print(f"  {icon} [{row.get('status', '?'):8s}] {row.get('label', '')}")
-        if row.get("details") and row.get("status") != "Success":
-            print(f"             {row['details']}")
 
-    if checkout_result is not None:
-        print("\n=== Checkout ===")
-        print(json.dumps(checkout_result, indent=2, default=str)[:2000])
+        effective_complete = args.complete_transaction and not args.dry_run
+        if args.dry_run and args.complete_transaction:
+            logger.info("Dry-run flag enabled; overriding complete-transaction.")
 
-    failed = sum(1 for r in summary if r.get("status") == "Failed")
-    print(
-        f"\nSummary: "
-        f"{sum(1 for r in summary if r.get('status') == 'Success')} added, "
-        f"{sum(1 for r in summary if r.get('status') == 'Skipped')} skipped, "
-        f"{failed} failed."
-    )
-    return 0 if failed == 0 else 1
+        logger.info(
+            "API enrollment: %d class(es), complete_transaction=%s",
+            len(schedule),
+            effective_complete,
+        )
+
+        summary, checkout_result = enroll_from_schedule(
+            client,
+            schedule,
+            student_id,
+            promo_code=args.promo_code or None,
+            complete_transaction=effective_complete,
+        )
+
+        print("\n=== Enrollment Run Report ===")
+        for row in summary:
+            icon = {"Success": "\u2714", "Skipped": "\u27f3", "Failed": "\u2718"}.get(
+                row.get("status"), "?"
+            )
+            print(f"  {icon} [{row.get('status', '?'):8s}] {row.get('label', '')}")
+            if row.get("details") and row.get("status") != "Success":
+                print(f"             {row['details']}")
+
+        if checkout_result is not None:
+            print("\n=== Checkout ===")
+            print(json.dumps(checkout_result, indent=2, default=str)[:2000])
+
+        failed = sum(1 for r in summary if r.get("status") == "Failed")
+        print(
+            f"\nSummary: "
+            f"{sum(1 for r in summary if r.get('status') == 'Success')} added, "
+            f"{sum(1 for r in summary if r.get('status') == 'Skipped')} skipped, "
+            f"{failed} failed."
+        )
+        exit_code = 0 if failed == 0 else 1
+    except Exception as exc:
+        main_exception = exc
+        logger.critical("A critical error occurred: %s", exc)
+    finally:
+        _finalize_api_enrollment_run(
+            args,
+            summary,
+            run_started_at=run_started_at,
+            main_exception=main_exception,
+            log_file=log_file,
+        )
+
+    return exit_code
 
 
 def _default_portal_slug() -> str:
