@@ -232,12 +232,25 @@
             flex: 1 1 0;
             min-width: 0;
         }
+        .row-actions {
+            display: flex;
+            gap: 0.35rem;
+            flex-shrink: 0;
+        }
+        .duplicate-btn,
         .delete-btn {
             width: auto;
             margin-bottom: 0;
+            padding: 0.4rem 0.75rem;
+        }
+        .duplicate-btn {
+            background-color: #495057;
+            border-color: #495057;
+        }
+        .duplicate-btn:hover { background-color: #343a40; border-color: #343a40; }
+        .delete-btn {
             background-color: #dc3545;
             border-color: #dc3545;
-            padding: 0.4rem 0.75rem;
         }
         .delete-btn:hover { background-color: #c82333; border-color: #bd2130; }
 
@@ -893,7 +906,34 @@
             }
         }
 
-        function addScheduleRow(loc = "", day = "Monday", time = "") {
+        function readScheduleRowValues(row) {
+            if (!row) return { loc: "", day: "Monday", time: "" };
+            const locSelect = row.querySelector(".loc-input");
+            const locInput = row.querySelector(".loc-input-text");
+            const loc = locSelect && locSelect.style.display === 'none'
+                ? (locInput ? locInput.value.trim() : "")
+                : (locSelect ? locSelect.value.trim() : "");
+            const day = row.querySelector(".day-input")?.value || "Monday";
+            const timeSelect = row.querySelector(".time-input");
+            const timeInput = row.querySelector(".time-input-text");
+            const time = timeSelect && timeSelect.style.display === 'none'
+                ? (timeInput ? timeInput.value.trim() : "")
+                : (timeSelect ? timeSelect.value.trim() : "");
+            return {
+                loc: loc === '__CUSTOM__' ? '' : loc,
+                day,
+                time: time === '__CUSTOM__' ? '' : time,
+            };
+        }
+
+        function duplicateScheduleRow(sourceRowId) {
+            const source = document.getElementById(sourceRowId);
+            if (!source) return;
+            const { loc, day, time } = readScheduleRowValues(source);
+            addScheduleRow(loc, day, time, source);
+        }
+
+        function addScheduleRow(loc = "", day = "Monday", time = "", insertAfterEl = null) {
             const rowId = `row-${rowCount++}`;
             const div = document.createElement("div");
             div.className = "schedule-row";
@@ -951,9 +991,16 @@
                     ${timeSelectHtml}
                     ${timeInputHtml}
                 </div>
-                <button type="button" class="delete-btn" onclick="document.getElementById('${rowId}').remove()">✕</button>
+                <div class="row-actions">
+                    <button type="button" class="duplicate-btn" title="Duplicate row below" onclick="duplicateScheduleRow('${rowId}')">⧉</button>
+                    <button type="button" class="delete-btn" title="Remove row" onclick="document.getElementById('${rowId}').remove()">✕</button>
+                </div>
             `;
-            scheduleContainer.appendChild(div);
+            if (insertAfterEl && insertAfterEl.parentNode === scheduleContainer) {
+                insertAfterEl.insertAdjacentElement('afterend', div);
+            } else {
+                scheduleContainer.appendChild(div);
+            }
         }
 
         function getScheduleData() {
