@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import warnings
+
+# Must run before any urllib3 import (including NotOpenSSLWarning).
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
+
 import argparse
 import json
 import logging
@@ -2517,9 +2522,36 @@ def open_api_discovery_cli(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_cli_driver() -> str:
+    """Enrollment driver from env (``api`` default)."""
+    enroll = (os.getenv("ICLASS_ENROLLMENT_DRIVER") or "").strip().lower()
+    if enroll == "playwright":
+        return "playwright"
+    if enroll == "api":
+        return "api"
+    legacy = (os.getenv("ICLASS_DRIVER") or "").strip().lower()
+    if legacy == "api" and os.getenv("ICLASS_ENROLLMENT_API", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return "api"
+    return "api"
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description="iClassPro Enrollment Bot")
+    parser.add_argument(
+        "--driver",
+        type=str,
+        choices=["playwright", "api"],
+        default=_default_cli_driver(),
+        help=(
+            "api: HTTP JWT enrollment (default, fast). "
+            "playwright: browser automation (fallback if JWT login fails)."
+        ),
+    )
     parser.add_argument(
         "--portal",
         type=str,
@@ -2631,6 +2663,11 @@ def main():
     if args.scrape:
         sys.exit(open_api_discovery_cli(args))
 
+    if args.driver == "api":
+        from iclasspro_jwt import run_api_enrollment
+
+        sys.exit(run_api_enrollment(args))
+
     # --- Setup Logging ---
     log_file = "iclasspro.log"
     # Get the root logger
@@ -2692,6 +2729,15 @@ def main():
 
         driver.webdriver()
         driver.login(email=args.email, password=args.password)
+
+        from iclasspro_jwt import clear_cart_before_enrollment
+
+        clear_cart_before_enrollment(
+            args.email,
+            args.password,
+            portal=args.portal or None,
+            schedule=schedule,
+        )
 
         for i, class_info in enumerate(schedule):
             log_info = {

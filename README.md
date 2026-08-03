@@ -74,12 +74,19 @@ The dashboard is a thin wrapper around `iclasspro.py`, which can also be run dir
 python3 iclasspro.py --help
 ```
 
-Class discovery uses the **public Open API** (`--scrape`). Enrollment uses **Playwright** (browser automation). Older scripts that call **`iclasspro_api.py`** forward to `iclasspro.py` with the same arguments.
+Class discovery uses the **public Open API** (`--scrape`). Enrollment defaults to the **HTTP API** driver (`--driver api` or `ICLASS_ENROLLMENT_DRIVER=api`), which calls the portal JWT API (`/api/jwt/v1`) with the same login the website uses. Use **Playwright** (`--driver playwright`) as a fallback if JWT login fails. Older scripts that call **`iclasspro_api.py`** forward to `iclasspro.py` with the same arguments.
+
+Probe JWT login without enrolling:
+
+```bash
+python3 scripts/probe_jwt_login.py
+```
 
 Key flags at a glance:
 
 | Flag | Description |
 |---|---|
+| `--driver` | `api` (default, JWT HTTP enrollment) or `playwright` (browser fallback) |
 | `--schedule` | Path to a schedule JSON file (enrollment) |
 | `--scrape` | Discover classes via Open API and print JSON (no browser login) |
 | `--scrape-days` | Comma-separated days to filter discovery (e.g. `Monday,Wednesday`) |
